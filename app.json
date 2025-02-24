@@ -2,9 +2,46 @@
   "expo": {
     "scheme": "acme",
     "plugins": [
-      "expo-router"
+      "expo-router",
+      "expo-build-properties"
     ],
     "name": "university-app",
-    "slug": "university-app"
+    "slug": "university-app",
+    "version": "alpha-0.3.0",
+    "android": {
+      "package": "com.university.app",
+      "versionCode": 1,
+      "permissions": [
+        "INTERNET",
+        "VIBRATE",
+        "INTERNET",
+        "VIBRATE"
+      ],
+      "config": {
+        "usesCleartextTraffic": true
+      }
+    },
+    "extra": {
+      "router": {
+        "origin": false
+      },
+      "eas": {
+        "projectId": "11e1e134-159d-41fc-9eb0-8671c3006336"
+      }
+    },
+    "newArchEnabled": true,
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/11e1e134-159d-41fc-9eb0-8671c3006336"
+    },
+    "ios": {}
   }
 }

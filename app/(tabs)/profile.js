@@ -108,13 +108,15 @@ export default function Profile() {
          </View>
        </View>
 
-       <TouchableOpacity
-         style={styles.logoutButton}
-         onPress={handleLogout}
-       >
-         <Ionicons name="log-out-outline" size={24} color="#FF3B30" />
-         <Text style={styles.logoutText}>Выйти</Text>
-       </TouchableOpacity>
+       <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
+  <Ionicons name="log-out-outline" size={24} color="#FF3B30" />
+  <Text style={styles.logoutText}>Выйти</Text>
+</TouchableOpacity>
+
+{/* Добавляем версию */}
+<View style={styles.versionContainer}>
+  <Text style={styles.versionText}>Версия aplha-0.3.0</Text>
+</View>
      </ScrollView>
    </SafeAreaView>
  );
@@ -189,6 +191,15 @@ const styles = StyleSheet.create({
      width: 0,
      height: 2,
    },
+     versionContainer: {
+  alignItems: 'center',
+  marginTop: 8,
+  marginBottom: 20,
+},
+versionText: {
+  fontSize: 13,
+  color: '#8E8E93',
+},
    shadowOpacity: 0.05,
    shadowRadius: 3.84,
    elevation: 5,

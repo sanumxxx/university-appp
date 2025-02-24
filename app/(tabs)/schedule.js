@@ -20,7 +20,7 @@ import Animated, {
   useSharedValue,
   useAnimatedStyle,
   withSpring,
-  runOnJS
+  runOnJS,
 } from 'react-native-reanimated';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -45,151 +45,60 @@ export default function Schedule() {
   const translateX = useSharedValue(0);
 
   const processSchedule = (data) => {
-  console.log('Starting processSchedule function');
-  console.log('Raw data:', data);
-  console.log('Processing for user:', user);
-
-  if (!data || !Array.isArray(data)) {
-    setSchedule([]);
-    return;
-  }
-
-  const timeSlots = {};
-  data.forEach(lesson => {
-    console.log('Processing lesson:', lesson);
-
-    // Для преподавателя просто сравниваем teacher_name
-    const isTeacherLesson = user.userType === 'teacher' &&
-      lesson.teacher_name === user.teacher;  // Изменили здесь: используем user.teacher вместо full_name
-
-    const isStudentLesson = user.userType === 'student' &&
-      (lesson.subgroup === 0 || lesson.subgroup === user.subgroup || !user.subgroup);
-
-    console.log('Is teacher lesson:', isTeacherLesson);
-    console.log('Is student lesson:', isStudentLesson);
-
-    if (isTeacherLesson || isStudentLesson) {
-      const timeKey = `${lesson.time_start}-${lesson.time_end}`;
-
-      if (!timeSlots[timeKey]) {
-        timeSlots[timeKey] = {
-          id: timeKey,
-          timeStart: lesson.time_start,
-          timeEnd: lesson.time_end,
-          lessons: []
-        };
-      }
-
-      if (user.userType === 'teacher') {
-        const existingLesson = timeSlots[timeKey].lessons.find(
-          existing =>
-            existing.subject === lesson.subject &&
-            existing.lesson_type === lesson.lesson_type &&
-            existing.auditory === lesson.auditory
-        );
-
-        if (existingLesson) {
-          if (!existingLesson.groups) {
-            existingLesson.groups = [existingLesson.group_name];
-          }
-          if (!existingLesson.groups.includes(lesson.group_name)) {
-            existingLesson.groups.push(lesson.group_name);
-          }
-        } else {
-          timeSlots[timeKey].lessons.push({
-            ...lesson,
-            groups: [lesson.group_name]
-          });
-        }
-      } else {
-        timeSlots[timeKey].lessons.push(lesson);
-      }
-    } else {
-      console.log('Skipping lesson - not matching user criteria');
-    }
-  });
-
-  const formattedSchedule = Object.entries(timeSlots)
-    .sort(([timeA], [timeB]) => timeA.localeCompare(timeB))
-    .map(([_, slot]) => ({
-      ...slot,
-      lessons: slot.lessons.sort((a, b) => (a.subgroup ?? 0) - (b.subgroup ?? 0))
-    }))
-    .filter(slot => slot.lessons.length > 0);
-
-  console.log('Final formatted schedule:', formattedSchedule);
-  setSchedule(formattedSchedule);
-};
-
-useEffect(() => {
-  console.log('Schedule component mounted');
-  loadWeekSchedule();
-}, []);
-
-useEffect(() => {
-  console.log('Current date changed:', currentDate.format('YYYY-MM-DD'));
-  if (weekSchedule[currentDate.format('YYYY-MM-DD')]) {
-    console.log('Using cached data for date');
-    processSchedule(weekSchedule[currentDate.format('YYYY-MM-DD')]);
-  } else {
-    console.log('Loading new data for date');
-    loadSchedule();
-  }
-}, [currentDate]);
-
-  const loadWeekSchedule = async () => {
-    const startOfWeek = currentDate.startOf('week');
-    const dates = Array.from({ length: 7 }, (_, i) => startOfWeek.add(i, 'day'));
-
-    Promise.all(
-      dates.map(date =>
-        api.get('/schedule', {
-          params: { date: date.format('YYYY-MM-DD') }
-        })
-        .then(response => ({ date: date.format('YYYY-MM-DD'), data: response.data }))
-        .catch(() => ({ date: date.format('YYYY-MM-DD'), data: [] }))
-      )
-    ).then(results => {
-      const newWeekSchedule = {};
-      results.forEach(({ date, data }) => {
-        newWeekSchedule[date] = data;
-      });
-      setWeekSchedule(newWeekSchedule);
-      setIsLoading(false);
-    });
-  };
-
-  const loadSchedule = async () => {
-  try {
-    console.log('Starting loadSchedule function');
-    console.log('Fetching data for date:', currentDate.format('YYYY-MM-DD'));
-    console.log('Current user:', user);
-
-    const response = await api.get('/schedule', {
-      params: {
-        date: currentDate.format('YYYY-MM-DD')
-      }
-    });
-
-    console.log('API Response:', response.data);
-
-    if (!response.data || !Array.isArray(response.data)) {
-      console.log('Invalid data received:', response.data);
+    if (!data || !Array.isArray(data)) {
       setSchedule([]);
       return;
     }
 
-    processSchedule(response.data);
-  } catch (error) {
-    console.error('Error in loadSchedule:', error);
-    console.error('Error details:', error.response?.data);
-    console.error('Error status:', error.response?.status);
-    setSchedule([]);
-  } finally {
-    setIsLoading(false);
-    setRefreshing(false);
-  }
-};
+    const timeSlots = {};
+    data.forEach((lesson) => {
+      const isTeacherLesson =
+        user.userType === 'teacher' && lesson.teacher_name === user.teacher;
+      const isStudentLesson =
+        user.userType === 'student' &&
+        (lesson.subgroup === 0 || lesson.subgroup === user.subgroup || !user.subgroup);
+
+      if (isTeacherLesson || isStudentLesson) {
+        const timeKey = `${lesson.time_start}-${lesson.time_end}`;
+        if (!timeSlots[timeKey]) {
+          timeSlots[timeKey] = {
+            id: timeKey,
+            timeStart: lesson.time_start,
+            timeEnd: lesson.time_end,
+            lessons: [],
+          };
+        }
+
+        if (user.userType === 'teacher') {
+          const existingLesson = timeSlots[timeKey].lessons.find(
+            (existing) =>
+              existing.subject === lesson.subject &&
+              existing.lesson_type === lesson.lesson_type &&
+              existing.auditory === lesson.auditory
+          );
+          if (existingLesson) {
+            if (!existingLesson.groups) existingLesson.groups = [existingLesson.group_name];
+            if (!existingLesson.groups.includes(lesson.group_name))
+              existingLesson.groups.push(lesson.group_name);
+          } else {
+            timeSlots[timeKey].lessons.push({ ...lesson, groups: [lesson.group_name] });
+          }
+        } else {
+          timeSlots[timeKey].lessons.push(lesson);
+        }
+      }
+    });
+
+    const formattedSchedule = Object.entries(timeSlots)
+      .sort(([timeA], [timeB]) => timeA.localeCompare(timeB))
+      .map(([_, slot]) => ({
+        ...slot,
+        lessons: slot.lessons.sort((a, b) => (a.subgroup ?? 0) - (b.subgroup ?? 0)),
+      }))
+      .filter((slot) => slot.lessons.length > 0);
+
+    setSchedule(formattedSchedule);
+  };
 
   useEffect(() => {
     loadWeekSchedule();
@@ -203,14 +112,53 @@ useEffect(() => {
     }
   }, [currentDate]);
 
+  const loadWeekSchedule = async () => {
+    setIsLoading(true);
+    const startOfWeek = currentDate.startOf('week');
+    const dates = Array.from({ length: 7 }, (_, i) => startOfWeek.add(i, 'day'));
+
+    try {
+      const results = await Promise.all(
+        dates.map((date) =>
+          api
+            .get('/schedule', { params: { date: date.format('YYYY-MM-DD') } })
+            .then((response) => ({ date: date.format('YYYY-MM-DD'), data: response.data }))
+            .catch(() => ({ date: date.format('YYYY-MM-DD'), data: [] }))
+        )
+      );
+      const newWeekSchedule = {};
+      results.forEach(({ date, data }) => {
+        newWeekSchedule[date] = data;
+      });
+      setWeekSchedule(newWeekSchedule);
+      processSchedule(newWeekSchedule[currentDate.format('YYYY-MM-DD')]);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const loadSchedule = async () => {
+    try {
+      const response = await api.get('/schedule', {
+        params: { date: currentDate.format('YYYY-MM-DD') },
+      });
+      processSchedule(response.data);
+    } catch (error) {
+      setSchedule([]);
+    } finally {
+      setIsLoading(false);
+      setRefreshing(false);
+    }
+  };
+
   const onRefresh = async () => {
     setRefreshing(true);
     await loadWeekSchedule();
     setRefreshing(false);
   };
 
-  const goToNextDay = () => setCurrentDate(prev => prev.add(1, 'day'));
-  const goToPrevDay = () => setCurrentDate(prev => prev.subtract(1, 'day'));
+  const goToNextDay = () => setCurrentDate((prev) => prev.add(1, 'day'));
+  const goToPrevDay = () => setCurrentDate((prev) => prev.subtract(1, 'day'));
 
   const gesture = Gesture.Pan()
     .onUpdate((e) => {
@@ -218,24 +166,24 @@ useEffect(() => {
     })
     .onEnd((e) => {
       if (Math.abs(e.translationX) > SWIPE_THRESHOLD) {
-        if (e.translationX > 0) {
-          runOnJS(goToPrevDay)();
-        } else {
-          runOnJS(goToNextDay)();
-        }
+        if (e.translationX > 0) runOnJS(goToPrevDay)();
+        else runOnJS(goToNextDay)();
       }
       translateX.value = withSpring(0);
     });
 
   const animatedStyle = useAnimatedStyle(() => ({
-    transform: [{ translateX: translateX.value }]
+    transform: [{ translateX: translateX.value }],
   }));
 
   const renderLesson = ({ item }) => (
     <View style={styles.lessonCard}>
       <View style={styles.timeContainer}>
         <Text style={styles.timeText}>
-          {formatTime(item.timeStart)} - {formatTime(item.timeEnd)}
+          {formatTime(item.timeStart)}
+        </Text>
+        <Text style={styles.timeText}>
+          {formatTime(item.timeEnd)}
         </Text>
       </View>
       <View style={styles.lessonsContainer}>
@@ -246,10 +194,12 @@ useEffect(() => {
               <Text style={styles.subjectText}>{lesson.subject}</Text>
               <Text style={styles.detailsText}>
                 {lesson.lesson_type} • {lesson.auditory}
-                {lesson.subgroup > 0 && ` • ${lesson.subgroup} подгруппа`}
+                {lesson.subgroup > 0 && ` • Подгруппа ${lesson.subgroup}`}
               </Text>
               <Text style={styles.teacherText}>
-                {user.userType === 'student' ? lesson.teacher_name : lesson.group_name}
+                {user.userType === 'student'
+                  ? lesson.teacher_name
+                  : lesson.groups?.join(', ') || lesson.group_name}
               </Text>
             </View>
           </View>
@@ -262,13 +212,15 @@ useEffect(() => {
     <GestureHandlerRootView style={styles.container}>
       <SafeAreaView style={styles.container} edges={['top']}>
         <View style={styles.header}>
-          <TouchableOpacity onPress={goToPrevDay}>
+          <TouchableOpacity style={styles.navButton} onPress={goToPrevDay}>
             <Ionicons name="chevron-back" size={24} color="#007AFF" />
           </TouchableOpacity>
-          <Text style={styles.dateText}>
-            {currentDate.format('D MMMM')}
-          </Text>
-          <TouchableOpacity onPress={goToNextDay}>
+          <View style={styles.headerTitleContainer}>
+            <Text style={styles.dateText}>
+              {currentDate.format('D MMMM, dddd')}
+            </Text>
+          </View>
+          <TouchableOpacity style={styles.navButton} onPress={goToNextDay}>
             <Ionicons name="chevron-forward" size={24} color="#007AFF" />
           </TouchableOpacity>
         </View>
@@ -278,12 +230,13 @@ useEffect(() => {
             {isLoading ? (
               <View style={styles.loaderContainer}>
                 <ActivityIndicator size="large" color="#007AFF" />
+                <Text style={styles.loadingText}>Загрузка расписания...</Text>
               </View>
             ) : (
               <FlatList
                 data={schedule}
                 renderItem={renderLesson}
-                keyExtractor={item => item.id}
+                keyExtractor={(item) => item.id}
                 contentContainerStyle={styles.listContent}
                 showsVerticalScrollIndicator={false}
                 refreshControl={
@@ -291,13 +244,16 @@ useEffect(() => {
                     refreshing={refreshing}
                     onRefresh={onRefresh}
                     tintColor="#007AFF"
-                    colors={["#007AFF"]}
-                    title="Обновление..."
+                    colors={['#007AFF']}
                   />
                 }
                 ListEmptyComponent={
                   <View style={styles.emptyContainer}>
-                    <Text style={styles.emptyText}>Нет пар на этот день</Text>
+                    <Ionicons name="calendar-outline" size={48} color="#8E8E93" />
+                    <Text style={styles.emptyText}>Нет занятий на этот день</Text>
+                    <Text style={styles.emptySubText}>
+                      Наслаждайтесь свободным временем!
+                    </Text>
                   </View>
                 }
               />
@@ -312,54 +268,72 @@ useEffect(() => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F2F2F7',
+    backgroundColor: '#F7F9FC', // Мягкий серо-голубой фон
   },
   scheduleContainer: {
     flex: 1,
   },
   header: {
-    paddingVertical: 16,
-    paddingHorizontal: 20,
-    backgroundColor: '#fff',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    backgroundColor: '#FFFFFF',
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     borderBottomWidth: 1,
     borderBottomColor: '#E5E5EA',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  navButton: {
+    padding: 8,
+    borderRadius: 12,
+    backgroundColor: '#F7F7F7',
+  },
+  headerTitleContainer: {
+    flex: 1,
+    alignItems: 'center',
   },
   dateText: {
     fontSize: 17,
-    fontWeight: '600',
-    color: '#000',
+    fontWeight: '700',
+    color: '#000000',
     textTransform: 'capitalize',
+    letterSpacing: -0.3,
   },
   listContent: {
-    padding: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 20,
   },
   lessonCard: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    marginBottom: 12,
-    padding: 16,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    marginBottom: 16,
     flexDirection: 'row',
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#E5E5EA',
     shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.05,
-    shadowRadius: 3.84,
-    elevation: 5,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
   },
   timeContainer: {
-    width: 110,
+    width: 80,
     marginRight: 16,
-    flexShrink: 0,
+    justifyContent: 'center',
+    alignItems: 'flex-start',
   },
   timeText: {
     fontSize: 15,
     color: '#8E8E93',
+    fontWeight: '500',
     fontVariant: ['tabular-nums'],
+    lineHeight: 20,
   },
   lessonsContainer: {
     flex: 1,
@@ -370,35 +344,51 @@ const styles = StyleSheet.create({
   divider: {
     height: 1,
     backgroundColor: '#E5E5EA',
-    marginVertical: 8,
+    marginVertical: 12,
   },
   subjectText: {
     fontSize: 17,
     fontWeight: '600',
-    color: '#000',
+    color: '#000000',
     marginBottom: 4,
   },
   detailsText: {
     fontSize: 15,
-    color: '#8E8E93',
+    color: '#6B7280',
     marginBottom: 4,
+    lineHeight: 20,
   },
   teacherText: {
     fontSize: 15,
     color: '#007AFF',
+    fontWeight: '500',
   },
   loaderContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
   },
+  loadingText: {
+    marginTop: 12,
+    fontSize: 15,
+    color: '#8E8E93',
+    fontWeight: '500',
+  },
   emptyContainer: {
     flex: 1,
     alignItems: 'center',
-    paddingTop: 32,
+    justifyContent: 'center',
+    paddingVertical: 40,
   },
   emptyText: {
+    fontSize: 17,
+    color: '#000000',
+    fontWeight: '600',
+    marginTop: 12,
+  },
+  emptySubText: {
     fontSize: 15,
     color: '#8E8E93',
+    marginTop: 8,
   },
 });

@@ -1,6 +1,6 @@
-import { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useState, useContext, useEffect } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { router } from 'expo-router';
+import api from '../utils/api';
 
 const AuthContext = createContext({});
 
@@ -9,21 +9,20 @@ export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
 
   useEffect(() => {
-    loadUser();
+    checkAuth();
   }, []);
 
-  const loadUser = async () => {
+  const checkAuth = async () => {
     try {
-      const [token, userStr] = await Promise.all([
-        AsyncStorage.getItem('token'),
-        AsyncStorage.getItem('user')
-      ]);
+      const token = await AsyncStorage.getItem('token');
+      const userData = await AsyncStorage.getItem('user');
 
-      if (token && userStr) {
-        setUser(JSON.parse(userStr));
+      if (token && userData) {
+        setUser(JSON.parse(userData));
+        api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
       }
     } catch (error) {
-      console.error('Load user error:', error);
+      console.error('Error checking auth:', error);
     } finally {
       setIsLoading(false);
     }
@@ -33,36 +32,33 @@ export function AuthProvider({ children }) {
     try {
       await AsyncStorage.setItem('token', token);
       await AsyncStorage.setItem('user', JSON.stringify(userData));
+      api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
       setUser(userData);
-      router.replace('/(tabs)/schedule');
     } catch (error) {
-      console.error('Login error:', error);
+      console.error('Error during login:', error);
+      throw error;
     }
   };
 
   const logout = async () => {
     try {
-      await AsyncStorage.multiRemove(['token', 'user']);
+      await AsyncStorage.removeItem('token');
+      await AsyncStorage.removeItem('user');
+      delete api.defaults.headers.common['Authorization'];
       setUser(null);
-      router.replace('/');
     } catch (error) {
-      console.error('Logout error:', error);
+      console.error('Error during logout:', error);
+      throw error;
     }
   };
 
-  const value = {
-    user,
-    isLoading,
-    login,
-    logout
-  };
-
-  if (isLoading) {
-    return null; // или компонент загрузки
-  }
-
   return (
-    <AuthContext.Provider value={value}>
+    <AuthContext.Provider value={{
+      isLoading,
+      user,
+      login,
+      logout
+    }}>
       {children}
     </AuthContext.Provider>
   );

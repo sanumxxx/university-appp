@@ -1,4 +1,4 @@
-const API_URL = 'http://81.200.144.179:5000/api';
+const API_URL = 'https://univappschedule.ru/api';
 export const API_ENDPOINTS = {
   LOGIN: '/login',
   REGISTER: '/register',
