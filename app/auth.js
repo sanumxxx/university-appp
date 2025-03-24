@@ -40,8 +40,12 @@ export default function Auth() {
   const [isLoginMode, setIsLoginMode] = useState(true);
   const [isLoading, setIsLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
-  const [groups, setGroups] = useState([]);
   const [teachers, setTeachers] = useState([]);
+  const [groups, setGroups] = useState([]);
+  const [filteredGroups, setFilteredGroups] = useState([]);
+  const [filteredTeachers, setFilteredTeachers] = useState([]);
+  const [showGroupSuggestions, setShowGroupSuggestions] = useState(false);
+  const [showTeacherSuggestions, setShowTeacherSuggestions] = useState(false);
   const [errors, setErrors] = useState({});
   const [isKeyboardVisible, setKeyboardVisible] = useState(false);
 
@@ -69,15 +73,47 @@ export default function Auth() {
 
   const loadInitialData = async () => {
     try {
-      const [groupsResponse, teachersResponse] = await Promise.all([
-        api.get('/groups'),
-        api.get('/teachers'),
-      ]);
-      setGroups(groupsResponse.data);
+      // Загружаем список преподавателей
+      const teachersResponse = await api.get('/teachers');
       setTeachers(teachersResponse.data);
+
+      // Загружаем список групп для подсказок
+      const groupsResponse = await api.get('/groups');
+      setGroups(groupsResponse.data || []);
     } catch (error) {
-      Alert.alert('Ошибка', 'Не удалось загрузить данные');
+      console.error('Error loading initial data:', error);
+      // Не показываем ошибку пользователю, чтобы не прерывать процесс регистрации
     }
+  };
+
+  // Фильтрация групп при вводе
+  const filterGroups = (text) => {
+    if (!text) {
+      setFilteredGroups([]);
+      return;
+    }
+
+    const filtered = groups.filter(group =>
+      group.toLowerCase().includes(text.toLowerCase())
+    ).slice(0, 5); // Ограничиваем до 5 результатов
+
+    setFilteredGroups(filtered);
+    setShowGroupSuggestions(filtered.length > 0);
+  };
+
+  // Фильтрация преподавателей при вводе
+  const filterTeachers = (text) => {
+    if (!text) {
+      setFilteredTeachers([]);
+      return;
+    }
+
+    const filtered = teachers.filter(teacher =>
+      teacher.toLowerCase().includes(text.toLowerCase())
+    ).slice(0, 5); // Ограничиваем до 5 результатов
+
+    setFilteredTeachers(filtered);
+    setShowTeacherSuggestions(filtered.length > 0);
   };
 
   useEffect(() => {
@@ -102,7 +138,7 @@ export default function Auth() {
 
       if (!formData.userType) newErrors.userType = 'Выберите тип';
       if (formData.userType === 'student' && !formData.group)
-        newErrors.group = 'Выберите группу';
+        newErrors.group = 'Введите группу';
       if (formData.userType === 'teacher' && !formData.teacher)
         newErrors.teacher = 'Выберите преподавателя';
     }
@@ -174,6 +210,7 @@ export default function Auth() {
     >
       <SafeAreaView style={styles.container}>
         <ScrollView
+          style={styles.scrollView}
           contentContainerStyle={styles.scrollContent}
           keyboardShouldPersistTaps="handled"
         >
@@ -305,32 +342,43 @@ export default function Auth() {
                 {formData.userType === 'student' && (
                   <View style={styles.inputContainer}>
                     <Text style={styles.label}>Группа</Text>
-                    <TouchableOpacity
-                      style={[styles.selectButton, errors.group && styles.selectButtonError]}
-                      onPress={() => {
-                        if (groups.length > 0)
-                          Alert.alert(
-                            'Выберите группу',
-                            '',
-                            groups.map(group => ({
-                              text: group,
-                              onPress: () => setFormData(prev => ({ ...prev, group }))
-                            })).concat([
-                              { text: 'Отмена', style: 'cancel' }
-                            ])
-                          );
+                    <TextInput
+                      style={getInputStyle('group')}
+                      placeholder="Например: 2211-0101.1"
+                      placeholderTextColor="#8E8E93"
+                      value={formData.group}
+                      onChangeText={(value) => {
+                        setFormData((prev) => ({ ...prev, group: value }));
+                        if (errors.group) setErrors((prev) => ({ ...prev, group: null }));
+                        filterGroups(value);
                       }}
-                    >
-                      <Text
-                        style={[
-                          styles.selectButtonText,
-                          !formData.group && styles.placeholderText,
-                        ]}
-                      >
-                        {formData.group || 'Выберите группу'}
-                      </Text>
-                      <Ionicons name="chevron-down" size={24} color="#8E8E93" />
-                    </TouchableOpacity>
+                      onFocus={() => {
+                        if (formData.group) filterGroups(formData.group);
+                      }}
+                      onBlur={() => {
+                        // Небольшая задержка, чтобы успеть выбрать элемент
+                        setTimeout(() => setShowGroupSuggestions(false), 200);
+                      }}
+                    />
+                    {showGroupSuggestions && filteredGroups.length > 0 && (
+                      <View style={styles.suggestionsContainer}>
+                        {filteredGroups.map((group) => (
+                          <TouchableOpacity
+                            key={group}
+                            style={styles.suggestionItem}
+                            onPress={() => {
+                              setFormData((prev) => ({ ...prev, group }));
+                              setShowGroupSuggestions(false);
+                              if (errors.group) setErrors((prev) => ({ ...prev, group: null }));
+                              Keyboard.dismiss();
+                            }}
+                          >
+                            <Ionicons name="school-outline" size={18} color="#007AFF" style={styles.suggestionIcon} />
+                            <Text style={styles.suggestionText}>{group}</Text>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                    )}
                     {errors.group && <Text style={styles.errorText}>{errors.group}</Text>}
                   </View>
                 )}
@@ -338,32 +386,43 @@ export default function Auth() {
                 {formData.userType === 'teacher' && (
                   <View style={styles.inputContainer}>
                     <Text style={styles.label}>Преподаватель</Text>
-                    <TouchableOpacity
-                      style={[styles.selectButton, errors.teacher && styles.selectButtonError]}
-                      onPress={() => {
-                        if (teachers.length > 0)
-                          Alert.alert(
-                            'Выберите преподавателя',
-                            '',
-                            teachers.map(teacher => ({
-                              text: teacher,
-                              onPress: () => setFormData(prev => ({ ...prev, teacher }))
-                            })).concat([
-                              { text: 'Отмена', style: 'cancel' }
-                            ])
-                          );
+                    <TextInput
+                      style={getInputStyle('teacher')}
+                      placeholder="Фамилия И.О."
+                      placeholderTextColor="#8E8E93"
+                      value={formData.teacher}
+                      onChangeText={(value) => {
+                        setFormData((prev) => ({ ...prev, teacher: value }));
+                        if (errors.teacher) setErrors((prev) => ({ ...prev, teacher: null }));
+                        filterTeachers(value);
                       }}
-                    >
-                      <Text
-                        style={[
-                          styles.selectButtonText,
-                          !formData.teacher && styles.placeholderText,
-                        ]}
-                      >
-                        {formData.teacher || 'Выберите преподавателя'}
-                      </Text>
-                      <Ionicons name="chevron-down" size={24} color="#8E8E93" />
-                    </TouchableOpacity>
+                      onFocus={() => {
+                        if (formData.teacher) filterTeachers(formData.teacher);
+                      }}
+                      onBlur={() => {
+                        // Небольшая задержка, чтобы успеть выбрать элемент
+                        setTimeout(() => setShowTeacherSuggestions(false), 200);
+                      }}
+                    />
+                    {showTeacherSuggestions && filteredTeachers.length > 0 && (
+                      <View style={styles.suggestionsContainer}>
+                        {filteredTeachers.map((teacher) => (
+                          <TouchableOpacity
+                            key={teacher}
+                            style={styles.suggestionItem}
+                            onPress={() => {
+                              setFormData((prev) => ({ ...prev, teacher }));
+                              setShowTeacherSuggestions(false);
+                              if (errors.teacher) setErrors((prev) => ({ ...prev, teacher: null }));
+                              Keyboard.dismiss();
+                            }}
+                          >
+                            <Ionicons name="person-outline" size={18} color="#007AFF" style={styles.suggestionIcon} />
+                            <Text style={styles.suggestionText}>{teacher}</Text>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                    )}
                     {errors.teacher && <Text style={styles.errorText}>{errors.teacher}</Text>}
                   </View>
                 )}
@@ -418,6 +477,9 @@ const styles = StyleSheet.create({
  container: {
    flex: 1,
    backgroundColor: '#FFFFFF',
+ },
+ scrollView: {
+   flex: 1,
  },
  scrollContent: {
    flexGrow: 1,
@@ -605,5 +667,34 @@ const styles = StyleSheet.create({
    color: '#007AFF',
    fontSize: 15,
    fontWeight: '500',
+ },
+ suggestionsContainer: {
+   backgroundColor: '#FFFFFF',
+   borderWidth: 1,
+   borderColor: '#E5E5EA',
+   borderRadius: 10,
+   marginTop: 4,
+   maxHeight: 180,
+   overflow: 'hidden',
+   shadowColor: '#000',
+   shadowOffset: { width: 0, height: 2 },
+   shadowOpacity: 0.1,
+   shadowRadius: 4,
+   elevation: 3,
+   zIndex: 100,
+ },
+ suggestionItem: {
+   flexDirection: 'row',
+   alignItems: 'center',
+   padding: 12,
+   borderBottomWidth: 1,
+   borderBottomColor: '#E5E5EA',
+ },
+ suggestionIcon: {
+   marginRight: 8,
+ },
+ suggestionText: {
+   fontSize: 16,
+   color: '#000000',
  },
 });

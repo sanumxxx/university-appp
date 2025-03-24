@@ -234,7 +234,7 @@ export default function Profile() {
 
         {/* Версия приложения */}
         <View style={styles.versionContainer}>
-          <Text style={styles.versionText}>Версия alpha-0.3.0</Text>
+          <Text style={styles.versionText}>Версия alpha-0.3.4 24.03.2025</Text>
         </View>
       </ScrollView>
     </SafeAreaView>

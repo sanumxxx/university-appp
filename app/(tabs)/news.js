@@ -1,0 +1,455 @@
+import React, { useState, useEffect, useRef } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  FlatList,
+  TouchableOpacity,
+  Image,
+  RefreshControl,
+  ActivityIndicator,
+  Animated,
+  Alert,
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
+import { useAuth } from '../../context/auth';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import api from '../../utils/api';
+import dayjs from 'dayjs';
+import 'dayjs/locale/ru';
+
+dayjs.locale('ru');
+
+// Компонент скелетона для новостей
+const NewsSkeleton = () => {
+  const fadeAnim = useRef(new Animated.Value(0.3)).current;
+
+  useEffect(() => {
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(fadeAnim, {
+          toValue: 0.8,
+          duration: 800,
+          useNativeDriver: true,
+        }),
+        Animated.timing(fadeAnim, {
+          toValue: 0.3,
+          duration: 800,
+          useNativeDriver: true,
+        }),
+      ])
+    ).start();
+  }, []);
+
+  const renderSkeletonItem = () => (
+    <View style={styles.newsCard}>
+      <Animated.View
+        style={[styles.skeletonImage, { opacity: fadeAnim }]}
+      />
+      <View style={styles.newsContent}>
+        <Animated.View
+          style={[styles.skeletonTitle, { opacity: fadeAnim }]}
+        />
+        <Animated.View
+          style={[styles.skeletonDescription, { opacity: fadeAnim }]}
+        />
+        <View style={styles.newsFooter}>
+          <Animated.View
+            style={[styles.skeletonDate, { opacity: fadeAnim }]}
+          />
+        </View>
+      </View>
+    </View>
+  );
+
+  return (
+    <View>
+      {[1, 2, 3, 4].map((_, index) => (
+        <React.Fragment key={index}>
+          {renderSkeletonItem()}
+        </React.Fragment>
+      ))}
+    </View>
+  );
+};
+
+// Основной компонент экрана новостей
+export default function News() {
+  const { user } = useAuth();
+  const [news, setNews] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [isOffline, setIsOffline] = useState(false);
+
+  // Компонент плейсхолдера для изображений
+  const NewsImagePlaceholder = ({ category }) => {
+    // Выбираем иконку в зависимости от категории новости
+    const getIconName = () => {
+      switch (category) {
+        case 'Учеба':
+          return 'school';
+        case 'Наука':
+          return 'flask';
+        case 'Спорт':
+          return 'basketball';
+        case 'Информация':
+          return 'information-circle';
+        case 'Культура':
+          return 'color-palette';
+        default:
+          return 'newspaper';
+      }
+    };
+
+    // Выбираем цвет в зависимости от категории
+    const getBackgroundColor = () => {
+      switch (category) {
+        case 'Учеба':
+          return '#5856D6';
+        case 'Наука':
+          return '#007AFF';
+        case 'Спорт':
+          return '#34C759';
+        case 'Информация':
+          return '#FF9500';
+        case 'Культура':
+          return '#FF2D55';
+        default:
+          return '#8E8E93';
+      }
+    };
+
+    return (
+      <View style={[styles.placeholderImage, { backgroundColor: getBackgroundColor() }]}>
+        <Ionicons name={getIconName()} size={48} color="#FFFFFF" />
+        <Text style={styles.placeholderText}>{category}</Text>
+      </View>
+    );
+  };
+
+  // Дефолтные новости из МелГУ
+  const defaultNews = [
+    {
+      id: 1,
+      title: 'Интерактивное занятие от кадровой школы "PROдвижение" в МелГУ!',
+      content: 'На базе нашего университета состоялось увлекательное интерактивное занятие, организованное представителями кадровой школы "PROдвижение".\nРанее ребята из Краснодара уже презентовали этот проект и рассказали о возможностях, которые предлагает данная школа. Студенты получили уникальную возможность узнать о перспективах, которые открываются перед ними по окончании курса, а также о том, как справляться с различными ситуациями, будучи вожатыми в детском лагере.\nВ игровой форме ребята познакомились со спецификой профессии вожатого, узнали о важных навыках и качествах, которые помогут им в этой роли. Занятие прошло в дружеской атмосфере, где каждый мог активно участвовать и задавать вопросы.',
+      image: 'https://melsu.ru/storage/images/uploads/PNmvmYodOMVkjIS6mIxvMTq5UmXw14xNDAp6zkIG/image.webp',
+      author: 'Пресс-служба МелГУ',
+      published_at: '2025-03-22T10:00:00',
+      category: 'События'
+    },
+    {
+      id: 2,
+      title: 'Научно-практическое партнёрство: МелГУ и ГБУ «Гидромелиорация» объединяют усилия',
+      content: 'Представители МелГУ посетили ГБУ «Гидромелиорация» для обсуждения актуальных вопросов, касающихся совершенствования систем орошения в регионе. Встреча стала важным шагом к объединению научных знаний и практических решений в сфере водного хозяйства.\n\nВ ходе встречи представители МелГУ и ГБУ «Гидромелиорация» выделили ряд ключевых проблем, требующих решения в сфере орошения Запорожской области:\n\n1. Изношенность инфраструктуры – необходимость комплексной оценки технического состояния гидротехнических сооружений и насосных станций.\n2. Устаревшие оросительные системы – требуются современные технологии и материалы для их модернизации, повышения эффективности и сокращения потерь воды.\n3. Ограниченность водных ресурсов – необходимость внедрения капельного орошения, дождевания и других инновационных методов для оптимального использования воды.\n4. Дефицит квалифицированных специалистов – потребность в образовательных программах и стажировках для подготовки кадров в области мелиорации и водного хозяйства.\n5. Поиск альтернативных источников воды – рассмотрение возможности использования очищенных сточных вод и других нестандартных решений с соблюдением экологических норм.\n6. Засоление почв – разработка мер по предотвращению и устранению этой проблемы, включая выбор солеустойчивых сельскохозяйственных культур и проведение мелиоративных мероприятий.',
+      image: 'https://melsu.ru/storage/images/uploads/gWDQUbUqivllP15xb79fiQH2sRxT7SoAe5d8WL65/image.webp',
+      author: 'Пресс-служба МелГУ',
+      published_at: '2025-03-21T13:30:00',
+      category: 'Наука'
+    },
+    {
+      id: 3,
+      title: 'Круглый стол по вопросам развития педагогического образования!',
+      content: 'В рамках IV Всероссийского форума по вопросам развития педагогического образования Российской академии образования на базе Мелитопольского государственного университета прошел онлайн круглый стол, организованный Запорожским научным центром РАО.\nТема обсуждения — «Психолого-педагогические проблемы обеспечения догоняющей и опережающей подготовки обучающихся школ, колледжей и учреждений высшего образования».',
+      image: 'https://melsu.ru/storage/images/uploads/v11cqwC6vygwkyujV1i7wm49BmY7JxPd8taueS8v/image.webp',
+      author: 'Пресс-служба МелГУ',
+      published_at: '2025-03-19T09:15:00',
+      category: 'Образование'
+    }
+  ];
+
+  useEffect(() => {
+    loadNews();
+  }, []);
+
+  // Функция загрузки новостей
+  const loadNews = async () => {
+    setIsLoading(true);
+    try {
+      // В реальном приложении здесь будет API запрос
+      // Имитируем задержку сети
+      await new Promise(resolve => setTimeout(resolve, 1000));
+
+      // Используем демо-данные вместо реального API
+      setNews(defaultNews);
+
+      // Сохраняем новости в кэш
+      await AsyncStorage.setItem('cached_news', JSON.stringify(defaultNews));
+      setIsOffline(false);
+    } catch (error) {
+      console.error('Ошибка при загрузке новостей:', error);
+
+      // Пытаемся загрузить новости из кэша при ошибке
+      try {
+        const cachedNews = await AsyncStorage.getItem('cached_news');
+        if (cachedNews) {
+          setNews(JSON.parse(cachedNews));
+          setIsOffline(true);
+          Alert.alert(
+            'Офлайн-режим',
+            'Показаны сохраненные новости. Подключитесь к интернету для получения актуальных данных.'
+          );
+        }
+      } catch (cacheError) {
+        console.error('Ошибка при загрузке кэшированных новостей:', cacheError);
+      }
+    } finally {
+      setIsLoading(false);
+      setRefreshing(false);
+    }
+  };
+
+  // Обработчик обновления при свайпе вниз
+  const onRefresh = () => {
+    setRefreshing(true);
+    loadNews();
+  };
+
+  // Форматирование даты публикации
+  const formatPublishedDate = (dateString) => {
+    const date = dayjs(dateString);
+    const now = dayjs();
+
+    if (now.diff(date, 'day') === 0) {
+      return `Сегодня, ${date.format('HH:mm')}`;
+    } else if (now.diff(date, 'day') === 1) {
+      return `Вчера, ${date.format('HH:mm')}`;
+    } else if (now.diff(date, 'day') < 7) {
+      return date.format('dddd, HH:mm');
+    } else {
+      return date.format('D MMMM YYYY');
+    }
+  };
+
+  // Просмотр полной новости
+  const viewNewsDetail = (item) => {
+    Alert.alert(
+      item.title,
+      item.content,
+      [{ text: 'Закрыть', style: 'cancel' }]
+    );
+  };
+
+  // Рендер элемента новости
+  const renderNewsItem = ({ item }) => (
+    <TouchableOpacity
+      style={styles.newsCard}
+      onPress={() => viewNewsDetail(item)}
+    >
+      <Image
+        source={{ uri: item.image }}
+        style={styles.newsImage}
+        defaultSource={require('../../assets/icon.png')} // Fallback изображение, если основное не загрузится
+        resizeMode="cover"
+      />
+      <View style={styles.newsContent}>
+        <Text style={styles.newsTitle}>{item.title}</Text>
+        <Text style={styles.newsDescription} numberOfLines={2}>
+          {item.content}
+        </Text>
+        <View style={styles.newsFooter}>
+          <View style={styles.categoryTag}>
+            <Text style={styles.categoryText}>{item.category}</Text>
+          </View>
+          <Text style={styles.newsDate}>
+            {formatPublishedDate(item.published_at)}
+          </Text>
+        </View>
+      </View>
+    </TouchableOpacity>
+  );
+
+  return (
+    <SafeAreaView style={styles.container} edges={['top']}>
+      <View style={styles.header}>
+        <Text style={styles.headerTitle}>Новости</Text>
+        {isOffline && (
+          <View style={styles.offlineIndicator}>
+            <Ionicons name="cloud-offline-outline" size={14} color="#FFFFFF" />
+            <Text style={styles.offlineText}>Офлайн режим</Text>
+          </View>
+        )}
+      </View>
+
+      {isLoading ? (
+        <NewsSkeleton />
+      ) : (
+        <FlatList
+          data={news}
+          renderItem={renderNewsItem}
+          keyExtractor={item => item.id.toString()}
+          contentContainerStyle={styles.list}
+          showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              tintColor="#007AFF"
+              colors={['#007AFF']}
+            />
+          }
+          ListEmptyComponent={
+            <View style={styles.emptyContainer}>
+              <Ionicons name="newspaper-outline" size={48} color="#8E8E93" />
+              <Text style={styles.emptyText}>
+                Нет доступных новостей
+              </Text>
+              <Text style={styles.emptySubtext}>
+                Потяните вниз, чтобы обновить
+              </Text>
+            </View>
+          }
+        />
+      )}
+    </SafeAreaView>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#F2F2F7',
+  },
+  header: {
+    padding: 16,
+    backgroundColor: '#FFFFFF',
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E5EA',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerTitle: {
+    fontSize: 17,
+    fontWeight: '600',
+    color: '#000000',
+    textAlign: 'center',
+  },
+  offlineIndicator: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FF9500',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 10,
+    position: 'absolute',
+    right: 16,
+  },
+  offlineText: {
+    fontSize: 12,
+    color: '#FFFFFF',
+    fontWeight: '500',
+    marginLeft: 4,
+  },
+  list: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
+  newsCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    marginBottom: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+    overflow: 'hidden',
+  },
+  newsImage: {
+    width: '100%',
+    height: 160,
+    resizeMode: 'cover',
+  },
+  newsContent: {
+    padding: 16,
+  },
+  newsTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#000000',
+    marginBottom: 8,
+  },
+  newsDescription: {
+    fontSize: 15,
+    color: '#3C3C43',
+    lineHeight: 20,
+    marginBottom: 12,
+  },
+  newsFooter: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  categoryTag: {
+    backgroundColor: '#E5E5EA',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 10,
+  },
+  categoryText: {
+    fontSize: 13,
+    color: '#3C3C43',
+    fontWeight: '500',
+  },
+  newsDate: {
+    fontSize: 13,
+    color: '#8E8E93',
+  },
+  emptyContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 40,
+  },
+  emptyText: {
+    fontSize: 17,
+    fontWeight: '600',
+    color: '#000000',
+    marginTop: 12,
+  },
+  emptySubtext: {
+    fontSize: 15,
+    color: '#8E8E93',
+    marginTop: 8,
+    textAlign: 'center',
+  },
+  // Стили для скелетона
+  skeletonImage: {
+    width: '100%',
+    height: 160,
+    backgroundColor: '#E5E5EA',
+  },
+  skeletonTitle: {
+    width: '80%',
+    height: 20,
+    backgroundColor: '#E5E5EA',
+    borderRadius: 4,
+    marginBottom: 12,
+  },
+  skeletonDescription: {
+    width: '100%',
+    height: 40,
+    backgroundColor: '#E5E5EA',
+    borderRadius: 4,
+    marginBottom: 12,
+  },
+  skeletonDate: {
+    width: 100,
+    height: 16,
+    backgroundColor: '#E5E5EA',
+    borderRadius: 4,
+  },
+  placeholderImage: {
+    width: '100%',
+    height: 160,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  placeholderText: {
+    color: '#FFFFFF',
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginTop: 8,
+  },
+});

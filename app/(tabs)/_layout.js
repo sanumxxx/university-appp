@@ -32,12 +32,25 @@ export default function TabsLayout() {
         }}
       />
       <Tabs.Screen
-        name="messages"
+        name="news"
         options={{
-          title: 'Сообщения',
+          title: 'Новости',
           tabBarIcon: ({ focused, color }) => (
             <Ionicons
-              name={focused ? 'chatbubble' : 'chatbubble-outline'}
+              name={focused ? 'newspaper' : 'newspaper-outline'}
+              size={24}
+              color={color}
+            />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="events"
+        options={{
+          title: 'Мероприятия',
+          tabBarIcon: ({ focused, color }) => (
+            <Ionicons
+              name={focused ? 'star' : 'star-outline'}
               size={24}
               color={color}
             />

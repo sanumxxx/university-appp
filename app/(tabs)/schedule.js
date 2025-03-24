@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import {
   View,
   StyleSheet,
@@ -24,6 +24,7 @@ import Animated, {
   withSpring,
   runOnJS,
 } from 'react-native-reanimated';
+import LessonDetailsModal from '../../components/LessonDetailsModal';
 
 // ========== Служба локального хранения данных ==========
 
@@ -257,8 +258,24 @@ export default function Schedule() {
   const [isLoading, setIsLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [isOffline, setIsOffline] = useState(false);
+  const [selectedLesson, setSelectedLesson] = useState(null);
+  const [modalVisible, setModalVisible] = useState(false);
 
   const translateX = useSharedValue(0);
+
+  // Обработка выбора занятия для просмотра деталей
+  const handleLessonSelect = (lesson) => {
+    setSelectedLesson(lesson);
+    setModalVisible(true);
+  };
+
+  // Закрытие модального окна
+  const handleModalClose = () => {
+    setModalVisible(false);
+    setTimeout(() => {
+      setSelectedLesson(null);
+    }, 300);
+  };
 
   // Обработка данных расписания
   const processSchedule = (data) => {
@@ -513,6 +530,27 @@ export default function Schedule() {
     transform: [{ translateX: translateX.value }],
   }));
 
+  // Определение цвета типа занятия
+  const getLessonTypeColor = (type) => {
+    switch (type?.toLowerCase()) {
+      case 'лекция':
+        return '#3E7BFA';
+      case 'практика':
+      case 'практическое занятие':
+        return '#34C759';
+      case 'лабораторная':
+      case 'лабораторная работа':
+        return '#FF9500';
+      case 'семинар':
+        return '#AF52DE';
+      case 'экзамен':
+      case 'зачет':
+        return '#FF3B30';
+      default:
+        return '#5856D6';
+    }
+  };
+
   // Рендер элемента расписания
   const renderLesson = ({ item }) => (
     <View style={styles.lessonCard}>
@@ -528,10 +566,24 @@ export default function Schedule() {
         {item.lessons.map((lesson, index) => (
           <View key={`${lesson.id}-${index}`}>
             {index > 0 && <View style={styles.divider} />}
-            <View style={styles.lessonInfo}>
-              <Text style={styles.subjectText}>{lesson.subject}</Text>
+            <TouchableOpacity
+              style={styles.lessonInfo}
+              onPress={() => handleLessonSelect(lesson)}
+              activeOpacity={0.7}
+            >
+              <View style={styles.lessonHeader}>
+                <Text style={styles.subjectText}>{lesson.subject}</Text>
+                <View
+                  style={[
+                    styles.lessonTypeBadge,
+                    { backgroundColor: getLessonTypeColor(lesson.lesson_type) }
+                  ]}
+                >
+                  <Text style={styles.lessonTypeText}>{lesson.lesson_type}</Text>
+                </View>
+              </View>
               <Text style={styles.detailsText}>
-                {lesson.lesson_type} • {lesson.auditory}
+                {lesson.auditory}
                 {lesson.subgroup > 0 && ` • Подгруппа ${lesson.subgroup}`}
               </Text>
               <Text style={styles.teacherText}>
@@ -539,7 +591,7 @@ export default function Schedule() {
                   ? lesson.teacher_name
                   : lesson.groups?.join(', ') || lesson.group_name}
               </Text>
-            </View>
+            </TouchableOpacity>
           </View>
         ))}
       </View>
@@ -611,6 +663,16 @@ export default function Schedule() {
             )}
           </Animated.View>
         </GestureDetector>
+
+        {/* Модальное окно с деталями занятия */}
+        {selectedLesson && (
+          <LessonDetailsModal
+            visible={modalVisible}
+            lesson={selectedLesson}
+            onClose={handleModalClose}
+            userType={user.userType}
+          />
+        )}
       </SafeAreaView>
     </GestureHandlerRootView>
   );
@@ -708,17 +770,35 @@ const styles = StyleSheet.create({
   },
   lessonInfo: {
     flex: 1,
+    paddingVertical: 4,
   },
-  divider: {
-    height: 1,
-    backgroundColor: '#E5E5EA',
-    marginVertical: 12,
+  lessonHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 6,
   },
   subjectText: {
     fontSize: 17,
     fontWeight: '600',
     color: '#000000',
-    marginBottom: 4,
+    flex: 1,
+    marginRight: 10,
+  },
+  lessonTypeBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 10,
+  },
+  lessonTypeText: {
+    fontSize: 12,
+    color: '#FFFFFF',
+    fontWeight: '600',
+  },
+  divider: {
+    height: 1,
+    backgroundColor: '#E5E5EA',
+    marginVertical: 12,
   },
   detailsText: {
     fontSize: 15,
