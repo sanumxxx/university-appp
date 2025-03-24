@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import {
   View,
   StyleSheet,
@@ -48,12 +48,6 @@ class ScheduleStorageService {
    */
   static async isNetworkAvailable() {
     // Заглушка для проверки сети - в реальном приложении нужно использовать NetInfo
-    // Требуется установить: npm install @react-native-community/netinfo
-    // import NetInfo from '@react-native-community/netinfo';
-    // const networkState = await NetInfo.fetch();
-    // return networkState.isConnected && networkState.isInternetReachable;
-
-    // Пробуем сделать простой запрос для проверки соединения
     try {
       const response = await fetch('https://univappschedule.ru/api/groups', {
         method: 'HEAD',
@@ -260,8 +254,55 @@ export default function Schedule() {
   const [isOffline, setIsOffline] = useState(false);
   const [selectedLesson, setSelectedLesson] = useState(null);
   const [modalVisible, setModalVisible] = useState(false);
+  const [page, setPage] = useState(0);
+  const [hasMoreMessages, setHasMoreMessages] = useState(true);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
 
   const translateX = useSharedValue(0);
+
+  // Проверка сети и загрузка данных
+  const checkNetworkAndLoadData = async () => {
+    try {
+      const networkAvailable = await ScheduleStorageService.isNetworkAvailable();
+      console.log('Network available:', networkAvailable);
+      setIsOffline(!networkAvailable);
+
+      if (networkAvailable) {
+        // Если есть сеть, загружаем свежие данные
+        await loadWeekSchedule();
+      } else {
+        // Если нет сети, пробуем загрузить из локального хранилища
+        try {
+          const cachedWeekSchedule = await ScheduleStorageService.getWeekSchedule();
+          if (cachedWeekSchedule) {
+            setWeekSchedule(cachedWeekSchedule);
+            const currentFormattedDate = currentDate.format('YYYY-MM-DD');
+            processSchedule(cachedWeekSchedule[currentFormattedDate]);
+            setIsLoading(false);
+            // Показываем уведомление о работе в офлайн-режиме
+            Alert.alert(
+              'Офлайн-режим',
+              'Вы работаете с сохраненными данными. Подключитесь к интернету для получения актуального расписания.',
+              [{ text: 'OK' }]
+            );
+          } else {
+            setIsLoading(false);
+            Alert.alert(
+              'Нет данных',
+              'Не удалось загрузить расписание. Пожалуйста, подключитесь к интернету.',
+              [{ text: 'OK' }]
+            );
+          }
+        } catch (error) {
+          console.error('Ошибка при загрузке данных из кэша:', error);
+          setIsLoading(false);
+        }
+      }
+    } catch (error) {
+      console.error('Ошибка при проверке сети:', error);
+      setIsLoading(false);
+    }
+  };
 
   // Обработка выбора занятия для просмотра деталей
   const handleLessonSelect = (lesson) => {
@@ -348,48 +389,21 @@ export default function Schedule() {
     }
   }, [currentDate]);
 
-  // Проверка сети и загрузка данных
-  const checkNetworkAndLoadData = async () => {
-    const networkAvailable = await ScheduleStorageService.isNetworkAvailable();
-    setIsOffline(!networkAvailable);
-
-    if (networkAvailable) {
-      // Если есть сеть, загружаем свежие данные
-      loadWeekSchedule();
-    } else {
-      // Если нет сети, пробуем загрузить из локального хранилища
-      try {
-        const cachedWeekSchedule = await ScheduleStorageService.getWeekSchedule();
-        if (cachedWeekSchedule) {
-          setWeekSchedule(cachedWeekSchedule);
-          processSchedule(cachedWeekSchedule[currentDate.format('YYYY-MM-DD')]);
-          setIsLoading(false);
-          // Показываем уведомление о работе в офлайн-режиме
-          Alert.alert(
-            'Офлайн-режим',
-            'Вы работаете с сохраненными данными. Подключитесь к интернету для получения актуального расписания.',
-            [{ text: 'OK' }]
-          );
-        } else {
-          setIsLoading(false);
-          Alert.alert(
-            'Нет данных',
-            'Не удалось загрузить расписание. Пожалуйста, подключитесь к интернету.',
-            [{ text: 'OK' }]
-          );
-        }
-      } catch (error) {
-        console.error('Ошибка при загрузке данных из кэша:', error);
-        setIsLoading(false);
-      }
-    }
-  };
-
-  // Загрузка расписания на неделю с сервера
+  // Загрузка расписания на неделю с сервера - ИСПРАВЛЕННАЯ ВЕРСИЯ
   const loadWeekSchedule = async () => {
+    console.log('Loading week schedule...');
     setIsLoading(true);
+
+    // Получаем начало недели и создаем массив дат
     const startOfWeek = currentDate.startOf('week');
-    const dates = Array.from({ length: 7 }, (_, i) => startOfWeek.add(i, 'day'));
+
+    // Правильно создаем массив дат для каждого дня недели
+    const dates = [];
+    for (let i = 0; i < 7; i++) {
+      dates.push(dayjs(startOfWeek).add(i, 'day'));
+    }
+
+    console.log('Generated dates:', dates.map(d => d.format('YYYY-MM-DD')));
 
     try {
       // Проверяем актуальность кэша
@@ -398,33 +412,63 @@ export default function Schedule() {
         // Если кэш актуален, используем его
         const cachedWeekSchedule = await ScheduleStorageService.getWeekSchedule();
         if (cachedWeekSchedule) {
+          console.log('Using cached week schedule');
           setWeekSchedule(cachedWeekSchedule);
           processSchedule(cachedWeekSchedule[currentDate.format('YYYY-MM-DD')]);
           setIsLoading(false);
+          setRefreshing(false);
           return;
         }
       }
 
       // Если кэш не актуален или его нет, загружаем данные с сервера
-      const results = await Promise.all(
-        dates.map((date) =>
-          api
-            .get('/schedule', { params: { date: date.format('YYYY-MM-DD') } })
-            .then((response) => ({ date: date.format('YYYY-MM-DD'), data: response.data }))
-            .catch(() => ({ date: date.format('YYYY-MM-DD'), data: [] }))
-        )
-      );
+      console.log('Fetching new week schedule from API...');
 
+      const results = [];
+
+      // Последовательно выполняем запросы для каждого дня
+      for (const date of dates) {
+        const formattedDate = date.format('YYYY-MM-DD');
+        console.log(`Fetching schedule for ${formattedDate}`);
+
+        try {
+          const response = await api.get('/schedule', {
+            params: { date: formattedDate }
+          });
+
+          results.push({
+            date: formattedDate,
+            data: response.data
+          });
+
+          console.log(`Got data for ${formattedDate}: ${response.data.length} items`);
+        } catch (error) {
+          console.error(`Error fetching schedule for ${formattedDate}:`, error);
+          results.push({ date: formattedDate, data: [] });
+        }
+      }
+
+      // Формируем объект с расписанием на неделю
       const newWeekSchedule = {};
       results.forEach(({ date, data }) => {
         newWeekSchedule[date] = data;
       });
 
+      console.log('Week schedule loaded:', Object.keys(newWeekSchedule).length, 'days');
+
       // Сохраняем данные в локальное хранилище
       await ScheduleStorageService.saveWeekSchedule(newWeekSchedule);
 
       setWeekSchedule(newWeekSchedule);
-      processSchedule(newWeekSchedule[currentDate.format('YYYY-MM-DD')]);
+      const currentFormatted = currentDate.format('YYYY-MM-DD');
+
+      if (newWeekSchedule[currentFormatted]) {
+        processSchedule(newWeekSchedule[currentFormatted]);
+      } else {
+        console.log(`No data for current date ${currentFormatted}`);
+        setSchedule([]);
+      }
+
     } catch (error) {
       console.error('Ошибка при загрузке расписания на неделю:', error);
       // Пробуем загрузить из кэша в случае ошибки
@@ -490,20 +534,41 @@ export default function Schedule() {
     }
   };
 
-  // Обновление данных при свайпе вниз
+  // Обновление данных при свайпе вниз - ИСПРАВЛЕННАЯ ВЕРСИЯ
   const onRefresh = async () => {
+    console.log('Pull-to-refresh triggered');
     setRefreshing(true);
+
     // Проверяем наличие сети перед обновлением
-    const networkAvailable = await ScheduleStorageService.isNetworkAvailable();
-    if (networkAvailable) {
-      setIsOffline(false);
-      await loadWeekSchedule();
-    } else {
-      setIsOffline(true);
+    try {
+      const networkAvailable = await ScheduleStorageService.isNetworkAvailable();
+      console.log('Network available for refresh:', networkAvailable);
+
+      if (networkAvailable) {
+        setIsOffline(false);
+
+        // Принудительно очищаем кэш перед обновлением
+        await ScheduleStorageService.clearCache();
+        console.log('Cache cleared for refresh');
+
+        // Загружаем свежие данные
+        await loadWeekSchedule();
+        console.log('Week schedule refreshed');
+      } else {
+        setIsOffline(true);
+        setRefreshing(false);
+        Alert.alert(
+          'Нет соединения',
+          'Не удается обновить расписание. Проверьте подключение к интернету.',
+          [{ text: 'OK' }]
+        );
+      }
+    } catch (error) {
+      console.error('Error during refresh:', error);
       setRefreshing(false);
       Alert.alert(
-        'Нет соединения',
-        'Не удается обновить расписание. Проверьте подключение к интернету.',
+        'Ошибка обновления',
+        'Не удалось обновить расписание. Попробуйте позже.',
         [{ text: 'OK' }]
       );
     }
