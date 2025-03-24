@@ -5,7 +5,7 @@
       "expo-router",
       "expo-build-properties"
     ],
-    "name": "university-app",
+    "name": "Портал МелГУ",
     "slug": "university-app",
     "version": "alpha-0.3.0",
     "android": {
@@ -13,12 +13,24 @@
       "versionCode": 1,
       "permissions": [
         "INTERNET",
-        "VIBRATE",
-        "INTERNET",
         "VIBRATE"
       ],
       "config": {
         "usesCleartextTraffic": true
+      }
+    },
+    "ios": {
+      "bundleIdentifier": "com.university.app",
+      "buildNumber": "1",
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSAppTransportSecurity": {
+          "NSAllowsArbitraryLoads": true
+        },
+        "UIBackgroundModes": [
+          "fetch",
+          "remote-notification"
+        ]
       }
     },
     "extra": {
@@ -41,7 +53,6 @@
     },
     "updates": {
       "url": "https://u.expo.dev/11e1e134-159d-41fc-9eb0-8671c3006336"
-    },
-    "ios": {}
+    }
   }
 }
