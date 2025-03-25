@@ -69,15 +69,15 @@ export default function StudentEvents() {
   const demoEvents = [
     {
       id: 1,
-      title: 'День открытых дверей факультета информатики',
-      description: 'Приглашаем абитуриентов и их родителей на День открытых дверей факультета информатики. Вы познакомитесь с преподавателями, узнаете о программах обучения, перспективах трудоустройства и студенческой жизни.',
+      title: 'День открытых дверей технического факультета',
+      description: 'Приглашаем абитуриентов и их родителей на День открытых дверей технического. Вы познакомитесь с преподавателями, узнаете о программах обучения, перспективах трудоустройства и студенческой жизни.',
       image: 'https://melsu.ru/storage/images/uploads/v11cqwC6vygwkyujV1i7wm49BmY7JxPd8taueS8v/image.webp',
       date: '2025-04-15T14:00:00',
-      location: 'Главный корпус МелГУ, аудитория 305',
+      location: '9.101',
       category: 'education',
       capacity: 100,
       registered: 67,
-      organizer: 'Факультет информатики'
+      organizer: 'Технический факультет'
     },
     {
       id: 2,
@@ -85,11 +85,11 @@ export default function StudentEvents() {
       description: 'Практический мастер-класс по программированию на языке Python. Участники познакомятся с основами языка, научатся создавать простые программы и решать алгоритмические задачи. Необходим ноутбук с предустановленным Python 3.8 или выше.',
       image: 'https://melsu.ru/storage/images/uploads/gWDQUbUqivllP15xb79fiQH2sRxT7SoAe5d8WL65/image.webp',
       date: '2025-04-10T16:30:00',
-      location: 'Компьютерный класс №112',
+      location: '7.202',
       category: 'science',
       capacity: 25,
       registered: 23,
-      organizer: 'Студенческое научное общество'
+      organizer: 'Кафедра ПМиИТ'
     },
     {
       id: 3,
@@ -97,11 +97,11 @@ export default function StudentEvents() {
       description: 'Интеллектуальная игра для студентов всех факультетов. Формируйте команды из 6 человек и проверьте свои знания в различных областях науки, искусства, истории и поп-культуры. Победителей ждут призы!',
       image: 'https://melsu.ru/storage/images/uploads/PNmvmYodOMVkjIS6mIxvMTq5UmXw14xNDAp6zkIG/image.webp',
       date: '2025-04-18T18:00:00',
-      location: 'Актовый зал',
+      location: '9.101',
       category: 'culture',
       capacity: 120,
       registered: 72,
-      organizer: 'Студенческий совет'
+      organizer: 'Технический факультет'
     },
     {
       id: 4,
@@ -121,7 +121,7 @@ export default function StudentEvents() {
       description: 'На ярмарке будут представлены ведущие работодатели региона. Студенты и выпускники смогут пообщаться с представителями компаний, оставить резюме и узнать о стажировках и вакансиях. Не забудьте взять с собой резюме!',
       image: 'https://melsu.ru/storage/images/uploads/v11cqwC6vygwkyujV1i7wm49BmY7JxPd8taueS8v/image.webp',
       date: '2025-05-05T12:00:00',
-      location: 'Холл первого этажа главного корпуса',
+      location: '2 корпус',
       category: 'career',
       capacity: 200,
       registered: 115,
