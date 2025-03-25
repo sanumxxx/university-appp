@@ -289,7 +289,7 @@ export default function StudentProfile() {
 
         {/* Версия приложения */}
         <View style={styles.versionContainer}>
-          <Text style={styles.versionText}>Версия alpha-0.4 25.03.2025</Text>
+          <Text style={styles.versionText}>Версия alpha-0.4.3 25.03.2025</Text>
         </View>
       </ScrollView>
     </SafeAreaView>
