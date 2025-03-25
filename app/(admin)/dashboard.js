@@ -115,7 +115,7 @@ export default function AdminDashboard() {
         </View>
         <TouchableOpacity
           style={styles.profileButton}
-          onPress={() => router.push('/(tabs)/profile')}
+          onPress={() => router.push('/(admin)/profile')}
         >
           <Ionicons name="person-circle" size={36} color="#007AFF" />
         </TouchableOpacity>
@@ -184,6 +184,17 @@ export default function AdminDashboard() {
               <Text style={styles.navTitle}>{item.title}</Text>
             </TouchableOpacity>
           ))}
+
+          {/* Добавляем плитку профиля */}
+          <TouchableOpacity
+            style={styles.navItem}
+            onPress={() => router.push('/(admin)/profile')}
+          >
+            <View style={[styles.navIconContainer, { backgroundColor: '#FF2D5520' }]}>
+              <Ionicons name="person" size={24} color="#FF2D55" />
+            </View>
+            <Text style={styles.navTitle}>Профиль</Text>
+          </TouchableOpacity>
         </View>
 
         {/* Recent Activity */}
@@ -247,6 +258,8 @@ const styles = StyleSheet.create({
   },
   profileButton: {
     padding: 4,
+    borderRadius: 20,
+    backgroundColor: '#F5F5F5',
   },
   scrollView: {
     flex: 1,

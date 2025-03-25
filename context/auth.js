@@ -1,4 +1,4 @@
-// context/auth.js - обновленная версия
+// context/auth.js - updated with better isAdmin check
 import React, { createContext, useState, useContext, useEffect } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import api from '../utils/api';
@@ -19,8 +19,11 @@ export function AuthProvider({ children }) {
       const userData = await AsyncStorage.getItem('user');
 
       if (token && userData) {
-        setUser(JSON.parse(userData));
+        const parsedUser = JSON.parse(userData);
+        setUser(parsedUser);
         api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+
+        console.log('User authenticated:', parsedUser.userType);
       }
     } catch (error) {
       console.error('Error checking auth:', error);
@@ -36,7 +39,9 @@ export function AuthProvider({ children }) {
       api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
       setUser(userData);
 
-      // Возвращаем базовый маршрут в зависимости от роли пользователя
+      console.log('User logged in as:', userData.userType);
+
+      // Return base route depending on user role
       if (userData.userType === 'admin') {
         return '/(admin)/dashboard';
       } else {
@@ -60,16 +65,19 @@ export function AuthProvider({ children }) {
     }
   };
 
-  // Проверка на роль администратора
-  const isAdmin = user?.userType === 'admin';
+  // Calculate whether the user is an admin
+  const isAdminUser = user && user.userType === 'admin';
 
   return (
     <AuthContext.Provider value={{
       isLoading,
       user,
-      isAdmin,  // Добавляем удобный флаг для проверки роли
+      isAdmin: isAdminUser,  // Boolean flag for easy checking
       login,
-      logout
+      logout,
+      // Helper function to determine the correct route for the user
+      getHomeRoute: () => isAdminUser ? '/(admin)/dashboard' : '/(tabs)/schedule',
+      getProfileRoute: () => isAdminUser ? '/(admin)/profile' : '/(tabs)/profile'
     }}>
       {children}
     </AuthContext.Provider>

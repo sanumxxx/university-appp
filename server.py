@@ -1,34 +1,44 @@
 import logging
 import os
+import re
 from datetime import datetime, timedelta
 from functools import wraps
 from logging.handlers import RotatingFileHandler
-from flask_socketio import SocketIO, emit, join_room, leave_room
-import os
-import re
-from datetime import datetime, timedelta
 from flask import Flask, request, jsonify, render_template_string, send_file
 import jwt
 import pymysql
-from flask import Flask, request, jsonify
 from flask_cors import CORS
 from werkzeug.security import generate_password_hash, check_password_hash
 
-# Инициализация Flask приложения
+# ============================================================
+# CONFIGURATION
+# ============================================================
+
+# Initialize Flask application
 app = Flask(__name__)
-socketio = SocketIO(app, cors_allowed_origins="*")
 CORS(app)
 
-# Конфигурация
-app.config['SECRET_KEY'] = 'your-secret-key'  # Измените на реальный секретный ключ
+# App configuration
+app.config['SECRET_KEY'] = 'your-secret-key'  # Change to real secret key
 app.config['JWT_EXPIRATION_DAYS'] = 30
 app.config['LOG_FILENAME'] = 'app.log'
 
-# Конфигурация базы данных
-DB_CONFIG = {'host': '147.45.153.76', 'user': 'sanumxxx', 'password': 'Yandex200515_',  # Укажите пароль
-             'db': 'timetable', 'charset': 'utf8mb4', 'use_unicode': True, 'cursorclass': pymysql.cursors.DictCursor}
+# Database configuration
+DB_CONFIG = {
+    'host': '147.45.153.76',
+    'user': 'sanumxxx',
+    'password': 'Yandex200515_',
+    'db': 'timetable',
+    'charset': 'utf8mb4',
+    'use_unicode': True,
+    'cursorclass': pymysql.cursors.DictCursor
+}
 
-# Настройка логирования
+# ============================================================
+# LOGGING SETUP
+# ============================================================
+
+# Setup logging
 if not os.path.exists('logs'):
     os.makedirs('logs')
 
@@ -40,730 +50,95 @@ app.logger.setLevel(logging.INFO)
 app.logger.info('Server startup')
 
 
-def require_auth(f):
-    @wraps(f)
-    def decorated(*args, **kwargs):
-        auth_header = request.headers.get('Authorization')
+# ============================================================
+# DATABASE FUNCTIONS
+# ============================================================
 
-        if not auth_header:
-            return jsonify({'error': 'Authorization header is missing'}), 401
-
-        try:
-            parts = auth_header.split()
-            if parts[0].lower() != 'bearer' or len(parts) != 2:
-                return jsonify({'error': 'Invalid authorization format'}), 401
-
-            token = parts[1]
-            payload = jwt.decode(token, app.config['SECRET_KEY'], algorithms=['HS256'])
-            user_id = payload['user_id']
-
-            conn = get_db()
-            cursor = conn.cursor()
-            cursor.execute('SELECT id FROM users WHERE id = %s', (user_id,))
-            user = cursor.fetchone()
-            conn.close()
-
-            if not user:
-                return jsonify({'error': 'User not found'}), 401
-
-            return f(user_id, *args, **kwargs)
-
-        except jwt.ExpiredSignatureError:
-            return jsonify({'error': 'Token has expired'}), 401
-        except jwt.InvalidTokenError:
-            return jsonify({'error': 'Invalid token'}), 401
-        except Exception as e:
-            app.logger.error(f'Auth error: {str(e)}')
-            return jsonify({'error': str(e)}), 500
-
-    return decorated
-
-
-@socketio.on('connect')
-def handle_connect():
-    app.logger.info('WebSocket client connected')
-
-
-def read_logs(tail_lines=100, filter_text=None, log_level=None, start_date=None, end_date=None):
-    """
-    Чтение логов с возможностью фильтрации
-
-    Args:
-        tail_lines: Количество строк для возврата
-        filter_text: Текст для фильтрации логов
-        log_level: Фильтр по уровню лога (INFO, WARNING, ERROR)
-        start_date: Начальная дата (ГГГГ-ММ-ДД)
-        end_date: Конечная дата (ГГГГ-ММ-ДД)
-    """
-    log_path = os.path.join('logs', app.config['LOG_FILENAME'])
-    try:
-        if not os.path.exists(log_path):
-            return ["Логи не найдены"]
-
-        with open(log_path, 'r', encoding='utf-8') as file:
-            lines = file.readlines()
-
-        # Применяем фильтры
-        filtered_lines = []
-        date_pattern = re.compile(r'(\d{4}-\d{2}-\d{2})')
-
-        for line in lines:
-            # Фильтр по тексту
-            if filter_text and filter_text.lower() not in line.lower():
-                continue
-
-            # Фильтр по уровню лога
-            if log_level:
-                if log_level == "ERROR" and "ERROR" not in line:
-                    continue
-                elif log_level == "WARNING" and "WARNING" not in line and "ERROR" not in line:
-                    continue
-                elif log_level == "INFO" and "INFO" not in line and "WARNING" not in line and "ERROR" not in line:
-                    continue
-
-            # Фильтр по дате
-            if start_date or end_date:
-                date_match = date_pattern.search(line)
-                if date_match:
-                    line_date = date_match.group(1)
-                    if start_date and line_date < start_date:
-                        continue
-                    if end_date and line_date > end_date:
-                        continue
-
-            filtered_lines.append(line)
-
-        # Возвращаем только запрошенное количество строк
-        return filtered_lines[-tail_lines:] if len(filtered_lines) > tail_lines else filtered_lines
-
-    except Exception as e:
-        return [f"Ошибка чтения логов: {str(e)}"]
-
-
-# Маршрут для просмотра логов
-@app.route('/logs', methods=['GET'])
-def view_logs():
-    lines = request.args.get('lines', default=100, type=int)
-    format_type = request.args.get('format', default='html', type=str)
-    filter_text = request.args.get('filter', default=None, type=str)
-    log_level = request.args.get('level', default=None, type=str)
-    start_date = request.args.get('start_date', default=None, type=str)
-    end_date = request.args.get('end_date', default=None, type=str)
-
-    # Скачивание сырого лог-файла
-    if format_type == 'raw':
-        log_path = os.path.join('logs', app.config['LOG_FILENAME'])
-        if os.path.exists(log_path):
-            return send_file(log_path, mimetype='text/plain')
-        return jsonify({'error': 'Файл логов не найден'}), 404
-
-    # Для JSON формата
-    if format_type == 'json':
-        logs = read_logs(lines, filter_text, log_level, start_date, end_date)
-        return jsonify(logs)
-
-    # По умолчанию: HTML формат
-    logs = read_logs(lines, filter_text, log_level, start_date, end_date)
-
-    # HTML шаблон для просмотра логов
-    html_template = """
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <title>Журнал действий пользователей</title>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <style>
-            body {
-                font-family: 'Segoe UI', Arial, sans-serif;
-                margin: 0;
-                padding: 20px;
-                background-color: #f0f2f5;
-                color: #333;
-            }
-            .container {
-                max-width: 1300px;
-                margin: 0 auto;
-                background-color: white;
-                padding: 25px;
-                border-radius: 8px;
-                box-shadow: 0 3px 10px rgba(0,0,0,0.1);
-            }
-            h1 {
-                color: #2c3e50;
-                margin-top: 0;
-                text-align: center;
-                font-size: 32px;
-                margin-bottom: 20px;
-                border-bottom: 2px solid #eaeaea;
-                padding-bottom: 15px;
-            }
-            .logs {
-                background-color: #f8f9fa;
-                border: 1px solid #dee2e6;
-                border-radius: 6px;
-                padding: 20px;
-                font-family: 'Courier New', monospace;
-                white-space: pre-wrap;
-                overflow-x: auto;
-                max-height: 70vh;
-                overflow-y: auto;
-            }
-            .log-line {
-                margin: 8px 0;
-                padding: 10px;
-                border-bottom: 1px solid #eaeaea;
-                border-radius: 4px;
-                font-size: 16px;
-                line-height: 1.5;
-                transition: background-color 0.2s;
-            }
-            .log-line:hover {
-                background-color: #f1f1f1;
-            }
-            .error { 
-                color: #e74c3c; 
-                font-weight: bold; 
-                background-color: #fdeaea;
-                border-left: 5px solid #e74c3c;
-            }
-            .warning { 
-                color: #e67e22; 
-                background-color: #fef5ea;
-                border-left: 5px solid #e67e22;
-            }
-            .info { 
-                color: #2980b9; 
-                background-color: #f0f7fc;
-                border-left: 5px solid #2980b9;
-            }
-            .controls {
-                margin-bottom: 20px;
-                display: flex;
-                justify-content: space-between;
-                align-items: center;
-                flex-wrap: wrap;
-                gap: 15px;
-            }
-            .control-group {
-                display: flex;
-                flex-wrap: wrap;
-                gap: 15px;
-                align-items: center;
-            }
-            select, button, input {
-                padding: 10px 15px;
-                border: 1px solid #ddd;
-                border-radius: 6px;
-                font-size: 15px;
-            }
-            button {
-                background-color: #3498db;
-                color: white;
-                cursor: pointer;
-                border: none;
-                font-weight: bold;
-                transition: background-color 0.2s;
-            }
-            button:hover {
-                background-color: #2980b9;
-            }
-            button.download {
-                background-color: #27ae60;
-            }
-            button.download:hover {
-                background-color: #219653;
-            }
-            .current-time {
-                font-size: 15px;
-                color: #7f8c8d;
-                background: #f8f9fa;
-                padding: 8px 15px;
-                border-radius: 6px;
-                border: 1px solid #eaeaea;
-            }
-            .filter-bar {
-                margin: 10px 0 20px 0;
-                padding: 20px;
-                background-color: #f8f9fa;
-                border-radius: 8px;
-                border: 1px solid #eaeaea;
-            }
-            .filter-form {
-                display: flex;
-                flex-wrap: wrap;
-                gap: 15px;
-                align-items: center;
-            }
-            .filter-form label {
-                margin-right: 8px;
-                font-weight: bold;
-                color: #34495e;
-            }
-            .filter-actions {
-                display: flex;
-                gap: 15px;
-                margin-top: 15px;
-            }
-            .highlight {
-                background-color: #ffeaa7;
-                color: #000;
-                padding: 2px 4px;
-                border-radius: 3px;
-                font-weight: bold;
-            }
-            .stat-box {
-                display: flex;
-                gap: 20px;
-                margin-bottom: 25px;
-            }
-            .stat-item {
-                background-color: #f8f9fa;
-                border: 1px solid #eaeaea;
-                border-radius: 8px;
-                padding: 15px 20px;
-                flex: 1;
-                text-align: center;
-                box-shadow: 0 2px 6px rgba(0,0,0,0.05);
-                transition: transform 0.2s;
-            }
-            .stat-item:hover {
-                transform: translateY(-3px);
-            }
-            .stat-item .count {
-                font-size: 28px;
-                font-weight: bold;
-                margin-bottom: 8px;
-            }
-            .stat-item .label {
-                color: #7f8c8d;
-                font-size: 16px;
-                font-weight: 500;
-            }
-            .error-stat { color: #e74c3c; }
-            .warning-stat { color: #e67e22; }
-            .info-stat { color: #2980b9; }
-            .schedule-view {
-                font-weight: bold;
-                background-color: #e8f4fc !important;
-            }
-            .user-name {
-                font-weight: bold;
-                color: #8e44ad;
-                text-decoration: underline;
-            }
-        </style>
-    </head>
-    <body>
-        <div class="container">
-            <h1>Журнал действий пользователей</h1>
-
-            <!-- Статистика -->
-            <div class="stat-box">
-                <div class="stat-item">
-                    <div class="count">{{ stats.total }}</div>
-                    <div class="label">Всего записей</div>
-                </div>
-                <div class="stat-item">
-                    <div class="count info-stat">{{ stats.info }}</div>
-                    <div class="label">Информация</div>
-                </div>
-                <div class="stat-item">
-                    <div class="count warning-stat">{{ stats.warning }}</div>
-                    <div class="label">Предупреждения</div>
-                </div>
-                <div class="stat-item">
-                    <div class="count error-stat">{{ stats.error }}</div>
-                    <div class="label">Ошибки</div>
-                </div>
-            </div>
-
-            <!-- Управление -->
-            <div class="controls">
-                <div class="control-group">
-                    <label for="lines">Строк:</label>
-                    <select id="lines" onchange="applyFilters()">
-                        <option value="50" {{ 'selected' if lines == 50 else '' }}>50</option>
-                        <option value="100" {{ 'selected' if lines == 100 else '' }}>100</option>
-                        <option value="500" {{ 'selected' if lines == 500 else '' }}>500</option>
-                        <option value="1000" {{ 'selected' if lines == 1000 else '' }}>1000</option>
-                    </select>
-                    <button onclick="refreshLogs()">Обновить</button>
-                    <a href="/logs?format=raw" target="_blank">
-                        <button type="button" class="download">Скачать файл логов</button>
-                    </a>
-                </div>
-                <div class="current-time">Последнее обновление: {{ current_time }}</div>
-            </div>
-
-            <!-- Панель фильтров -->
-            <div class="filter-bar">
-                <form id="filter-form" class="filter-form" onsubmit="applyFilters(); return false;">
-                    <div>
-                        <label for="filter-text">Поиск по тексту:</label>
-                        <input type="text" id="filter-text" value="{{ filter_text or '' }}" placeholder="Введите текст для поиска...">
-                    </div>
-                    <div>
-                        <label for="log-level">Уровень:</label>
-                        <select id="log-level">
-                            <option value="" {{ 'selected' if not log_level else '' }}>Все уровни</option>
-                            <option value="INFO" {{ 'selected' if log_level == 'INFO' else '' }}>Информация+</option>
-                            <option value="WARNING" {{ 'selected' if log_level == 'WARNING' else '' }}>Предупреждения+</option>
-                            <option value="ERROR" {{ 'selected' if log_level == 'ERROR' else '' }}>Только ошибки</option>
-                        </select>
-                    </div>
-                    <div>
-                        <label for="start-date">С даты:</label>
-                        <input type="date" id="start-date" value="{{ start_date or '' }}">
-                    </div>
-                    <div>
-                        <label for="end-date">По дату:</label>
-                        <input type="date" id="end-date" value="{{ end_date or '' }}">
-                    </div>
-                    <div class="filter-actions">
-                        <button type="submit">Применить фильтры</button>
-                        <button type="button" onclick="clearFilters()">Сбросить фильтры</button>
-                    </div>
-                </form>
-            </div>
-
-            <!-- Отображение логов -->
-            <div class="logs">
-                {% for log in logs %}
-                    <div class="log-line 
-                        {% if 'ERROR' in log %}error
-                        {% elif 'WARNING' in log %}warning
-                        {% elif 'INFO' in log %}info{% endif %}
-                        {% if 'SCHEDULE REQUESTED' in log %}schedule-view{% endif %}">
-                        {% if filter_text %}
-                            {{ log|replace(filter_text, '<span class="highlight">' + filter_text + '</span>')|safe }}
-                        {% else %}
-                            {{ log|safe }}
-                        {% endif %}
-                    </div>
-                {% endfor %}
-            </div>
-        </div>
-
-        <script>
-            function refreshLogs() {
-                location.reload();
-            }
-
-            function applyFilters() {
-                const lines = document.getElementById('lines').value;
-                const filterText = document.getElementById('filter-text').value;
-                const logLevel = document.getElementById('log-level').value;
-                const startDate = document.getElementById('start-date').value;
-                const endDate = document.getElementById('end-date').value;
-
-                let url = `/logs?lines=${lines}`;
-                if (filterText) url += `&filter=${encodeURIComponent(filterText)}`;
-                if (logLevel) url += `&level=${logLevel}`;
-                if (startDate) url += `&start_date=${startDate}`;
-                if (endDate) url += `&end_date=${endDate}`;
-
-                window.location.href = url;
-            }
-
-            function clearFilters() {
-                document.getElementById('filter-text').value = '';
-                document.getElementById('log-level').value = '';
-                document.getElementById('start-date').value = '';
-                document.getElementById('end-date').value = '';
-                applyFilters();
-            }
-
-            // Авто-обновление каждые 30 секунд
-            const refreshTimer = setTimeout(() => {
-                refreshLogs();
-            }, 30000);
-
-            // Прокрутка вниз при загрузке страницы
-            window.onload = function() {
-                const logsContainer = document.querySelector('.logs');
-                logsContainer.scrollTop = logsContainer.scrollHeight;
-
-                // Выделение имен пользователей в строках расписания
-                highlightUserNames();
-            };
-
-            // Функция выделения имен пользователей
-            function highlightUserNames() {
-                const logLines = document.querySelectorAll('.log-line');
-                const nameRegex = /([А-Яа-яЁё]+ [А-Яа-яЁё]+ [А-Яа-яЁё]+)/g;
-
-                logLines.forEach(line => {
-                    if (line.classList.contains('schedule-view')) {
-                        line.innerHTML = line.innerHTML.replace(nameRegex, '<span class="user-name">$1</span>');
-                    }
-                });
-            }
-        </script>
-    </body>
-    </html>
-    """
-
-    # Рассчитываем статистику
-    stats = {
-        'total': len(logs),
-        'info': sum(1 for log in logs if 'INFO' in log and 'ERROR' not in log and 'WARNING' not in log),
-        'warning': sum(1 for log in logs if 'WARNING' in log and 'ERROR' not in log),
-        'error': sum(1 for log in logs if 'ERROR' in log)
-    }
-
-    # Форматируем логи для отображения ФИО пользователей
-    for i, log in enumerate(logs):
-        if "SCHEDULE REQUESTED" in log:
-            logs[i] = log.replace("SCHEDULE REQUESTED", "<strong>ПРОСМОТР РАСПИСАНИЯ</strong>")
-
-    current_time = datetime.now().strftime("%d.%m.%Y %H:%M:%S")
-    return render_template_string(
-        html_template,
-        logs=logs,
-        lines=lines,
-        current_time=current_time,
-        filter_text=filter_text,
-        log_level=log_level,
-        start_date=start_date,
-        end_date=end_date,
-        stats=stats
-    )
-
-
-# Add this helper function to log user actions consistently
-def log_user_action(user_id, action, details=None):
-    """Log user actions with details"""
-    if details:
-        app.logger.info(f"USER ACTION: User {user_id} - {action} - {details}")
-    else:
-        app.logger.info(f"USER ACTION: User {user_id} - {action}")
-
-
-# Optional - Add a scheduled task to rotate logs if they get too large
-def setup_log_rotation():
-    """Setup scheduled task to check log size and rotate if needed"""
-
-    def check_log_size():
-        log_path = os.path.join('logs', app.config['LOG_FILENAME'])
-        max_size_mb = 10  # Maximum log size in MB
-
-        if os.path.exists(log_path):
-            size_mb = os.path.getsize(log_path) / (1024 * 1024)
-            if size_mb > max_size_mb:
-                # Rotate logs
-                timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
-                backup_path = f"{log_path}.{timestamp}"
-
-                try:
-                    # Copy current log to backup
-                    with open(log_path, 'r', encoding='utf-8') as src:
-                        with open(backup_path, 'w', encoding='utf-8') as dst:
-                            dst.write(src.read())
-
-                    # Clear current log file
-                    with open(log_path, 'w', encoding='utf-8') as f:
-                        f.write(f"Log rotated at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-
-                    app.logger.info(f"Log rotated. Previous log saved as {backup_path}")
-                except Exception as e:
-                    app.logger.error(f"Error rotating log: {str(e)}")
-
-
-@socketio.on('join_chat')
-@require_auth
-def on_join(user_id, data):
-    chat_id = data['chat_id']
-    join_room(str(chat_id))
-    app.logger.info(f'User {user_id} joined chat {chat_id}')
-
-
-@socketio.on('leave_chat')
-@require_auth
-def on_leave(user_id, data):
-    chat_id = data['chat_id']
-    leave_room(str(chat_id))
-    app.logger.info(f'User {user_id} left chat {chat_id}')
-
-
-@app.route('/api/chats/<int:chat_id>/messages', methods=['POST'])
-@require_auth
-def send_message(user_id, chat_id):
-    data = request.get_json()
-    message = data.get('message')
-
-    if not message:
-        return jsonify({'error': 'Message is required'}), 400
-
-    conn = get_db()
-    cursor = conn.cursor()
-
-    try:
-        # Проверяем, является ли пользователь участником чата
-        cursor.execute('''
-            SELECT 1 FROM chat_members
-            WHERE chat_id = %s AND user_id = %s
-        ''', (chat_id, user_id))
-
-        if not cursor.fetchone():
-            return jsonify({'error': 'Access denied'}), 403
-
-        # Добавляем сообщение
-        cursor.execute('''
-            INSERT INTO chat_messages (chat_id, sender_id, message)
-            VALUES (%s, %s, %s)
-        ''', (chat_id, user_id, message))
-
-        message_id = cursor.lastrowid
-
-        # Получаем добавленное сообщение
-        cursor.execute('''
-            SELECT 
-                m.id,
-                m.message,
-                m.created_at,
-                m.is_read,
-                m.sender_id,
-                u.full_name as sender_name
-            FROM chat_messages m
-            JOIN users u ON m.sender_id = u.id
-            WHERE m.id = %s
-        ''', (message_id,))
-
-        new_message = cursor.fetchone()
-        conn.commit()
-
-        # Отправляем сообщение через WebSocket
-        socketio.emit('new_message', {
-            'chat_id': chat_id,
-            'message': new_message['message'],
-            'created_at': new_message['created_at'].isoformat(),
-            'sender_name': new_message['sender_name'],
-        }, room=str(chat_id))
-
-        return jsonify(new_message)
-
-    except Exception as e:
-        conn.rollback()
-        return jsonify({'error': str(e)}), 500
-    finally:
-        conn.close()
-
-
-# Функция подключения к БД
 def get_db():
+    """Get database connection"""
     return pymysql.connect(**DB_CONFIG)
 
 
-# Инициализация базы данных
 def init_db():
+    """Initialize database tables"""
     conn = get_db()
     cursor = conn.cursor()
 
     try:
-        # Установка кодировки
+        # Set encoding
         cursor.execute('SET NAMES utf8mb4')
         cursor.execute('SET CHARACTER SET utf8mb4')
         cursor.execute('SET character_set_connection=utf8mb4')
 
-        # Создание таблицы пользователей
+        # Create users table
         cursor.execute('''
-           CREATE TABLE IF NOT EXISTS users (
-               id INT AUTO_INCREMENT PRIMARY KEY,
-               email VARCHAR(255) UNIQUE NOT NULL,
-               password VARCHAR(255) NOT NULL,
-               full_name VARCHAR(255) NOT NULL,
-               user_type ENUM('student', 'teacher') NOT NULL,
-               group_name VARCHAR(255),
-               teacher_name VARCHAR(255),
-               created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-               updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-           ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-       ''')
+            CREATE TABLE IF NOT EXISTS users (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                email VARCHAR(255) UNIQUE NOT NULL,
+                password VARCHAR(255) NOT NULL,
+                full_name VARCHAR(255) NOT NULL,
+                user_type ENUM('student', 'teacher', 'admin') NOT NULL,
+                group_name VARCHAR(255),
+                teacher_name VARCHAR(255),
+                status VARCHAR(50) DEFAULT 'active',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        ''')
 
-        # Создание таблицы расписания
+        # Create schedule table
         cursor.execute('''
-           CREATE TABLE IF NOT EXISTS schedule (
-               id INT AUTO_INCREMENT PRIMARY KEY,
-               semester INT,
-               week_number INT,
-               group_name VARCHAR(255),
-               course INT,
-               faculty VARCHAR(255),
-               subject VARCHAR(255),
-               lesson_type VARCHAR(50),
-               subgroup INT,
-               date DATE,
-               time_start TIME,
-               time_end TIME,
-               weekday INT,
-               teacher_name VARCHAR(255),
-               auditory VARCHAR(50),
-               created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-               updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-               INDEX idx_date (date),
-               INDEX idx_group (group_name),
-               INDEX idx_teacher (teacher_name)
-           ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-       ''')
+            CREATE TABLE IF NOT EXISTS schedule (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                semester INT,
+                week_number INT,
+                group_name VARCHAR(255),
+                course INT,
+                faculty VARCHAR(255),
+                subject VARCHAR(255),
+                lesson_type VARCHAR(50),
+                subgroup INT,
+                date DATE,
+                time_start TIME,
+                time_end TIME,
+                weekday INT,
+                teacher_name VARCHAR(255),
+                auditory VARCHAR(50),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                INDEX idx_date (date),
+                INDEX idx_group (group_name),
+                INDEX idx_teacher (teacher_name)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        ''')
 
-        # Создание таблицы чатов
+        # Create notifications table
         cursor.execute('''
-           CREATE TABLE IF NOT EXISTS chats (
-               id INT AUTO_INCREMENT PRIMARY KEY,
-               name VARCHAR(255),
-               type ENUM('private', 'group') NOT NULL,
-               created_by INT NOT NULL,
-               group_id VARCHAR(255),
-               created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-               updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-               FOREIGN KEY (created_by) REFERENCES users(id)
-           ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-       ''')
+            CREATE TABLE IF NOT EXISTS notifications (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                user_id INT NOT NULL,
+                type VARCHAR(50) NOT NULL,
+                title VARCHAR(255) NOT NULL,
+                message TEXT NOT NULL,
+                is_read BOOLEAN DEFAULT FALSE,
+                data JSON,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        ''')
 
-        # Создание таблицы участников чата
+        # Create admin activity log table
         cursor.execute('''
-           CREATE TABLE IF NOT EXISTS chat_members (
-               id INT AUTO_INCREMENT PRIMARY KEY,
-               chat_id INT NOT NULL,
-               user_id INT NOT NULL,
-               last_read_at TIMESTAMP,
-               created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-               FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE CASCADE,
-               FOREIGN KEY (user_id) REFERENCES users(id),
-               UNIQUE KEY unique_chat_member (chat_id, user_id)
-           ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-       ''')
-
-        # Создание таблицы сообщений чата
-        cursor.execute('''
-           CREATE TABLE IF NOT EXISTS chat_messages (
-               id INT AUTO_INCREMENT PRIMARY KEY,
-               chat_id INT NOT NULL,
-               sender_id INT NOT NULL,
-               message TEXT NOT NULL,
-               is_read BOOLEAN DEFAULT FALSE,
-               created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-               updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-               FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE CASCADE,
-               FOREIGN KEY (sender_id) REFERENCES users(id)
-           ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-       ''')
-
-        # Создание таблицы уведомлений
-        cursor.execute('''
-           CREATE TABLE IF NOT EXISTS notifications (
-               id INT AUTO_INCREMENT PRIMARY KEY,
-               user_id INT NOT NULL,
-               type VARCHAR(50) NOT NULL,
-               title VARCHAR(255) NOT NULL,
-               message TEXT NOT NULL,
-               is_read BOOLEAN DEFAULT FALSE,
-               data JSON,
-               created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-               FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-           ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-       ''')
+            CREATE TABLE IF NOT EXISTS admin_activity_log (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                admin_id INT NOT NULL,
+                admin_name VARCHAR(255) NOT NULL,
+                action VARCHAR(255) NOT NULL,
+                details TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (admin_id) REFERENCES users(id)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        ''')
 
         conn.commit()
         app.logger.info('Database initialized successfully')
@@ -776,8 +151,25 @@ def init_db():
         conn.close()
 
 
-# Декоратор для проверки авторизации
+# ============================================================
+# AUTHENTICATION HELPERS
+# ============================================================
+
+def generate_token(user_id):
+    """Generate JWT token for user authentication"""
+    try:
+        token = jwt.encode(
+            {'user_id': user_id, 'exp': datetime.utcnow() + timedelta(days=app.config['JWT_EXPIRATION_DAYS'])},
+            app.config['SECRET_KEY'], algorithm='HS256')
+        return token
+    except Exception as e:
+        app.logger.error(f'Token generation error: {str(e)}')
+        raise e
+
+
 def require_auth(f):
+    """Decorator to require authentication for routes"""
+
     @wraps(f)
     def decorated(*args, **kwargs):
         auth_header = request.headers.get('Authorization')
@@ -816,438 +208,186 @@ def require_auth(f):
     return decorated
 
 
-# Получение списка чатов пользователя
-@app.route('/api/chats', methods=['GET'])
-@require_auth
-def get_chats(user_id):
+def require_admin(f):
+    """Decorator to require admin authentication for routes"""
+
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        auth_header = request.headers.get('Authorization')
+
+        if not auth_header:
+            return jsonify({'error': 'Authorization header is missing'}), 401
+
+        try:
+            parts = auth_header.split()
+            if parts[0].lower() != 'bearer' or len(parts) != 2:
+                return jsonify({'error': 'Invalid authorization format'}), 401
+
+            token = parts[1]
+            payload = jwt.decode(token, app.config['SECRET_KEY'], algorithms=['HS256'])
+            user_id = payload['user_id']
+
+            conn = get_db()
+            cursor = conn.cursor()
+            cursor.execute('SELECT id, user_type FROM users WHERE id = %s', (user_id,))
+            user = cursor.fetchone()
+            conn.close()
+
+            if not user:
+                return jsonify({'error': 'User not found'}), 401
+
+            if user['user_type'] != 'admin':
+                return jsonify({'error': 'Admin access required'}), 403
+
+            # Log admin access
+            app.logger.info(f'ADMIN ACCESS: User ID {user_id} accessed admin API: {request.path}')
+
+            return f(user_id, *args, **kwargs)
+
+        except jwt.ExpiredSignatureError:
+            return jsonify({'error': 'Token has expired'}), 401
+        except jwt.InvalidTokenError:
+            return jsonify({'error': 'Invalid token'}), 401
+        except Exception as e:
+            app.logger.error(f'Admin auth error: {str(e)}')
+            return jsonify({'error': str(e)}), 500
+
+    return decorated
+
+
+# ============================================================
+# LOGGING HELPERS
+# ============================================================
+
+def log_user_action(user_id, action, details=None):
+    """Log user actions with details"""
+    if details:
+        app.logger.info(f"USER ACTION: User {user_id} - {action} - {details}")
+    else:
+        app.logger.info(f"USER ACTION: User {user_id} - {action}")
+
+
+def log_admin_activity(admin_id, action, details=None):
+    """Log admin activity in database"""
     conn = get_db()
     cursor = conn.cursor()
 
     try:
-        app.logger.info(f'Getting chats for user_id: {user_id}')
+        # Get admin name
+        cursor.execute('SELECT full_name FROM users WHERE id = %s', (admin_id,))
+        admin = cursor.fetchone()
+        admin_name = admin['full_name'] if admin else 'Unknown Admin'
 
+        # Log the activity
         cursor.execute('''
-            SELECT 
-                c.id,
-                c.name,
-                c.type,
-                c.created_at,
-                c.group_id,
-                COALESCE(c.name, 
-                    CASE 
-                        WHEN c.type = 'private' THEN 
-                            (SELECT full_name 
-                            FROM users u 
-                            JOIN chat_members cm ON u.id = cm.user_id 
-                            WHERE cm.chat_id = c.id AND u.id != %s 
-                            LIMIT 1)
-                        ELSE c.name
-                    END
-                ) as display_name,
-                (
-                    SELECT COUNT(*) 
-                    FROM chat_messages m 
-                    WHERE m.chat_id = c.id 
-                    AND m.sender_id != %s 
-                    AND m.created_at > COALESCE(
-                        (SELECT last_read_at 
-                         FROM chat_members 
-                         WHERE chat_id = c.id AND user_id = %s),
-                        '1970-01-01'
-                    )
-                ) as unread_count,
-                (
-                    SELECT message 
-                    FROM chat_messages 
-                    WHERE chat_id = c.id 
-                    ORDER BY created_at DESC 
-                    LIMIT 1
-                ) as last_message,
-                (
-                    SELECT created_at 
-                    FROM chat_messages 
-                    WHERE chat_id = c.id 
-                    ORDER BY created_at DESC 
-                    LIMIT 1
-                ) as last_message_at,
-                EXISTS (
-                    SELECT 1 
-                    FROM chat_members 
-                    WHERE chat_id = c.id 
-                    AND user_id = %s
-                ) as is_member
-            FROM chats c
-            JOIN chat_members cm ON c.id = cm.chat_id
-            WHERE cm.user_id = %s
-            GROUP BY c.id
-            ORDER BY CASE WHEN last_message_at IS NULL THEN 1 ELSE 0 END, last_message_at DESC
-        ''', (user_id, user_id, user_id, user_id, user_id))
+            INSERT INTO admin_activity_log 
+            (admin_id, admin_name, action, details) 
+            VALUES (%s, %s, %s, %s)
+        ''', (admin_id, admin_name, action, details))
 
-        chats = cursor.fetchall()
-        app.logger.info(f'Found {len(chats)} chats')
-
-        return jsonify(chats)
-
-    except Exception as e:
-        app.logger.error(f'Error in get_chats: {str(e)}')
-        return jsonify({'error': str(e)}), 500
-    finally:
-        conn.close()
-
-
-# Получение списка преподавателей для студента
-@app.route('/api/teachers/my', methods=['GET'])
-@require_auth
-def get_my_teachers(user_id):
-    conn = get_db()
-    cursor = conn.cursor()
-
-    try:
-        app.logger.info(f'Getting teachers for student_id: {user_id}')
-
-        # Получаем группу студента
-        cursor.execute('SELECT group_name, user_type FROM users WHERE id = %s', (user_id,))
-        user = cursor.fetchone()
-        app.logger.info(f'Found user: {user}')
-
-        if not user:
-            return jsonify({'error': 'User not found'}), 404
-
-        if user['user_type'] != 'student':
-            return jsonify({'error': 'Only students can view teachers'}), 403
-
-        if not user['group_name']:
-            return jsonify({'error': 'Student group not found'}), 404
-
-        # Получаем преподавателей, которые ведут предметы у этой группы
-        cursor.execute('''
-            SELECT DISTINCT 
-                u.id,
-                u.full_name,
-                u.email,
-                u.teacher_name
-            FROM users u
-            JOIN schedule s ON u.teacher_name = s.teacher_name
-            WHERE s.group_name = %s
-            AND u.user_type = 'teacher'
-            AND u.teacher_name IS NOT NULL
-        ''', (user['group_name'],))
-
-        teachers = cursor.fetchall()
-        app.logger.info(f'Found {len(teachers)} teachers')
-
-        return jsonify(teachers)
-
-    except Exception as e:
-        app.logger.error(f'Error in get_my_teachers: {str(e)}')
-        return jsonify({'error': str(e)}), 500
-    finally:
-        conn.close()
-
-
-@app.route('/api/students/my', methods=['GET'])
-@require_auth
-def get_my_students(user_id):
-    conn = get_db()
-    cursor = conn.cursor()
-
-    try:
-        # Получаем имя преподавателя
-        cursor.execute('SELECT teacher_name, user_type FROM users WHERE id = %s', (user_id,))
-        user = cursor.fetchone()
-
-        if not user or user['user_type'] != 'teacher':
-            return jsonify({'error': 'Access denied'}), 403
-
-        # Получаем collation столбца teacher_name из таблицы schedule
-        cursor.execute(
-            "SELECT COLLATION_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'schedule' AND COLUMN_NAME = 'teacher_name'")
-        result = cursor.fetchone()
-        teacher_name_collation = result[
-            'COLLATION_NAME'] if result else 'utf8mb4_0900_ai_ci'  # По умолчанию, если не удалось получить
-
-        # Получаем всех студентов из групп, где преподаёт учитель (за всё время)
-        cursor.execute(f'''
-            SELECT DISTINCT
-                u.id,
-                u.full_name,
-                u.email,
-                u.group_name
-            FROM users u
-            WHERE u.group_name IN (
-                SELECT DISTINCT group_name
-                FROM schedule
-                WHERE teacher_name COLLATE {teacher_name_collation} = %s COLLATE {teacher_name_collation}
-            )
-            AND u.user_type = 'student'
-            ORDER BY u.group_name, u.full_name
-        ''', (user['teacher_name'],))
-
-        students = cursor.fetchall()
-        app.logger.info(f'Found {len(students)} students for teacher {user["teacher_name"]}')
-
-        return jsonify(students)
-
-    except Exception as e:
-        app.logger.error(f'Error in get_my_students: {str(e)}')
-        return jsonify({'error': str(e)}), 500
-    finally:
-        conn.close()
-
-
-# Создание личного чата
-@app.route('/api/chats/private', methods=['POST'])
-@require_auth
-def create_private_chat(user_id):
-    data = request.get_json()
-    recipient_id = data.get('userId')
-
-    if not recipient_id:
-        return jsonify({'error': 'Recipient ID is required'}), 400
-
-    conn = get_db()
-    cursor = conn.cursor()
-
-    try:
-        # Проверяем существующий чат
-        cursor.execute('''
-            SELECT c.id FROM chats c
-            JOIN chat_members cm1 ON c.id = cm1.chat_id
-            JOIN chat_members cm2 ON c.id = cm2.chat_id
-            WHERE c.type = 'private'
-            AND cm1.user_id = %s
-            AND cm2.user_id = %s
-        ''', (user_id, recipient_id))
-
-        existing_chat = cursor.fetchone()
-        if existing_chat:
-            chat_id = existing_chat['id']
-        else:
-            # Создаем новый чат
-            cursor.execute('''
-                INSERT INTO chats (type, created_by)
-                VALUES ('private', %s)
-            ''', (user_id,))
-
-            chat_id = cursor.lastrowid
-
-            # Добавляем участников
-            cursor.execute('''
-                INSERT INTO chat_members (chat_id, user_id)
-                VALUES (%s, %s), (%s, %s)
-            ''', (chat_id, user_id, chat_id, recipient_id))
-
-        # Получаем информацию о чате
-        cursor.execute('''
-            SELECT 
-                c.*,
-                (SELECT full_name 
-                 FROM users 
-                 WHERE id = %s) as recipient_name
-            FROM chats c
-            WHERE c.id = %s
-        ''', (recipient_id, chat_id))
-
-        chat = cursor.fetchone()
         conn.commit()
-
-        return jsonify(chat)
+        app.logger.info(f'ADMIN ACTION: {admin_name} ({admin_id}) {action} {details or ""}')
 
     except Exception as e:
         conn.rollback()
-        return jsonify({'error': str(e)}), 500
+        app.logger.error(f'Error logging admin activity: {str(e)}')
     finally:
         conn.close()
 
 
-# Создание группового чата
-@app.route('/api/chats/group', methods=['POST'])
-@require_auth
-def create_group_chat(user_id):
-    data = request.get_json()
-    group_id = data.get('groupId')
-    name = data.get('name')
+def read_logs(tail_lines=100, filter_text=None, log_level=None, start_date=None, end_date=None):
+    """
+    Read logs with filtering options
 
-    if not group_id or not name:
-        return jsonify({'error': 'Group ID and name are required'}), 400
-
-    conn = get_db()
-    cursor = conn.cursor()
-
+    Args:
+        tail_lines: Number of lines to return
+        filter_text: Text to filter logs by
+        log_level: Filter by log level (INFO, WARNING, ERROR)
+        start_date: Start date (YYYY-MM-DD)
+        end_date: End date (YYYY-MM-DD)
+    """
+    log_path = os.path.join('logs', app.config['LOG_FILENAME'])
     try:
-        # Проверяем, является ли создатель преподавателем
-        cursor.execute('''
-            SELECT user_type, teacher_name 
-            FROM users 
-            WHERE id = %s
-        ''', (user_id,))
+        if not os.path.exists(log_path):
+            return ["Logs not found"]
 
-        user = cursor.fetchone()
-        if user['user_type'] != 'teacher':
-            return jsonify({'error': 'Only teachers can create group chats'}), 403
+        with open(log_path, 'r', encoding='utf-8') as file:
+            lines = file.readlines()
 
-        # Создаем групповой чат
-        cursor.execute('''
-            INSERT INTO chats (name, type, created_by, group_id)
-            VALUES (%s, 'group', %s, %s)
-        ''', (name, user_id, group_id))
+        # Apply filters
+        filtered_lines = []
+        date_pattern = re.compile(r'(\d{4}-\d{2}-\d{2})')
 
-        chat_id = cursor.lastrowid
+        for line in lines:
+            # Text filter
+            if filter_text and filter_text.lower() not in line.lower():
+                continue
 
-        # Получаем всех студентов группы
-        cursor.execute('''
-            SELECT id FROM users
-            WHERE group_name = %s AND user_type = 'student'
-        ''', (group_id,))
+            # Log level filter
+            if log_level:
+                if log_level == "ERROR" and "ERROR" not in line:
+                    continue
+                elif log_level == "WARNING" and "WARNING" not in line and "ERROR" not in line:
+                    continue
+                elif log_level == "INFO" and "INFO" not in line and "WARNING" not in line and "ERROR" not in line:
+                    continue
 
-        students = cursor.fetchall()
+            # Date filter
+            if start_date or end_date:
+                date_match = date_pattern.search(line)
+                if date_match:
+                    line_date = date_match.group(1)
+                    if start_date and line_date < start_date:
+                        continue
+                    if end_date and line_date > end_date:
+                        continue
 
-        # Добавляем всех студентов и создателя в чат
-        values = [(chat_id, student['id']) for student in students]
-        values.append((chat_id, user_id))
+            filtered_lines.append(line)
 
-        cursor.executemany('''
-            INSERT INTO chat_members (chat_id, user_id)
-            VALUES (%s, %s)
-        ''', values)
-
-        # Получаем информацию о созданном чате
-        cursor.execute('SELECT * FROM chats WHERE id = %s', (chat_id,))
-        chat = cursor.fetchone()
-
-        conn.commit()
-        return jsonify(chat)
+        # Return only requested number of lines
+        return filtered_lines[-tail_lines:] if len(filtered_lines) > tail_lines else filtered_lines
 
     except Exception as e:
-        conn.rollback()
-        return jsonify({'error': str(e)}), 500
-    finally:
-        conn.close()
+        return [f"Error reading logs: {str(e)}"]
 
 
-# Получение сообщений чата
-@app.route('/api/chats/<int:chat_id>/messages', methods=['GET'])
-@require_auth
-def get_chat_messages(user_id, chat_id):
-    limit = int(request.args.get('limit', 20))
-    offset = int(request.args.get('offset', 0))
+# ============================================================
+# USER AUTHENTICATION ROUTES
+# ============================================================
 
-    conn = get_db()
-    cursor = conn.cursor()
-
-    try:
-        # Проверяем, является ли пользователь участником чата
-        cursor.execute('''
-            SELECT 1 FROM chat_members
-            WHERE chat_id = %s AND user_id = %s
-        ''', (chat_id, user_id))
-
-        if not cursor.fetchone():
-            return jsonify({'error': 'Access denied'}), 403
-
-        # Получаем сообщения
-        cursor.execute('''
-            SELECT 
-                m.id,
-                m.message,
-                m.created_at,
-                m.is_read,
-                m.sender_id,
-                u.full_name as sender_name
-            FROM chat_messages m
-            JOIN users u ON m.sender_id = u.id
-            WHERE m.chat_id = %s
-            ORDER BY m.created_at DESC
-            LIMIT %s OFFSET %s
-        ''', (chat_id, limit, offset))
-
-        messages = cursor.fetchall()
-        return jsonify(messages)
-
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-    finally:
-        conn.close()
-
-
-# Отправка сообщения
-
-
-# Отметка сообщений как прочитанных
-@app.route('/api/chats/<int:chat_id>/read', methods=['POST'])
-@require_auth
-def mark_messages_read(user_id, chat_id):
-    conn = get_db()
-    cursor = conn.cursor()
-
-    try:
-        # Обновляем статус сообщений
-        cursor.execute('''
-            UPDATE chat_messages
-            SET is_read = TRUE
-            WHERE chat_id = %s
-            AND sender_id != %s
-            AND is_read = FALSE
-        ''', (chat_id, user_id))
-
-        # Обновляем время последнего прочтения
-        cursor.execute('''
-            UPDATE chat_members
-            SET last_read_at = CURRENT_TIMESTAMP
-            WHERE chat_id = %s AND user_id = %s
-        ''', (chat_id, user_id))
-
-        conn.commit()
-        return jsonify({'success': True})
-
-    except Exception as e:
-        conn.rollback()
-        return jsonify({'error': str(e)}), 500
-    finally:
-        conn.close()
-
-
-# Генерация JWT токена
-def generate_token(user_id):
-    try:
-        token = jwt.encode(
-            {'user_id': user_id, 'exp': datetime.utcnow() + timedelta(days=app.config['JWT_EXPIRATION_DAYS'])},
-            app.config['SECRET_KEY'], algorithm='HS256')
-        return token
-    except Exception as e:
-        app.logger.error(f'Token generation error: {str(e)}')
-        raise e
-
-
-# Маршруты API
-
-# Регистрация
 @app.route('/api/register', methods=['POST'])
 def register():
+    """Register a new user"""
     data = request.get_json()
     conn = get_db()
     cursor = conn.cursor()
 
     try:
-        # Проверка обязательных полей
+        # Check required fields
         required_fields = ['email', 'password', 'fullName', 'userType']
         if not all(field in data for field in required_fields):
             return jsonify({'error': 'Missing required fields'}), 400
 
-        # Проверка существования email
+        # Check if email already exists
         cursor.execute('SELECT id FROM users WHERE email = %s', (data['email'],))
         if cursor.fetchone():
             return jsonify({'error': 'Email already exists'}), 400
 
-        # Хеширование пароля
+        # Hash password
         hashed_password = generate_password_hash(data['password'])
 
-        # Вставка пользователя
+        # Insert user
         cursor.execute('''
             INSERT INTO users (email, password, full_name, user_type, group_name, teacher_name)
             VALUES (%s, %s, %s, %s, %s, %s)
         ''', (
-            data['email'], hashed_password, data['fullName'], data['userType'], data.get('group'), data.get('teacher')))
+            data['email'],
+            hashed_password,
+            data['fullName'],
+            data['userType'],
+            data.get('group'),
+            data.get('teacher')
+        ))
 
         conn.commit()
         user_id = cursor.lastrowid
@@ -1256,9 +396,17 @@ def register():
 
         app.logger.info(f'New user registered: {data["email"]}')
 
-        return jsonify({'token': token, 'user': {'id': user_id, 'email': data['email'], 'fullName': data['fullName'],
-                                                 'userType': data['userType'], 'group': data.get('group'),
-                                                 'teacher': data.get('teacher')}})
+        return jsonify({
+            'token': token,
+            'user': {
+                'id': user_id,
+                'email': data['email'],
+                'fullName': data['fullName'],
+                'userType': data['userType'],
+                'group': data.get('group'),
+                'teacher': data.get('teacher')
+            }
+        })
 
     except Exception as e:
         conn.rollback()
@@ -1269,9 +417,9 @@ def register():
         conn.close()
 
 
-# Авторизация
 @app.route('/api/login', methods=['POST'])
 def login():
+    """User login"""
     data = request.get_json()
     conn = get_db()
     cursor = conn.cursor()
@@ -1296,10 +444,17 @@ def login():
         app.logger.info(
             f'LOGIN SUCCESS: User ID {user["id"]} ({user["email"]}) - Type: {user["user_type"]} - IP: {request.remote_addr}')
 
-        return jsonify({'token': token,
-                        'user': {'id': user['id'], 'email': user['email'], 'fullName': user['full_name'],
-                                 'userType': user['user_type'], 'group': user['group_name'],
-                                 'teacher': user['teacher_name']}})
+        return jsonify({
+            'token': token,
+            'user': {
+                'id': user['id'],
+                'email': user['email'],
+                'fullName': user['full_name'],
+                'userType': user['user_type'],
+                'group': user['group_name'],
+                'teacher': user['teacher_name']
+            }
+        })
 
     except Exception as e:
         app.logger.error(f'Login error for {data.get("email", "unknown")}: {str(e)} - IP: {request.remote_addr}')
@@ -1309,19 +464,24 @@ def login():
         conn.close()
 
 
+# ============================================================
+# SCHEDULE ROUTES
+# ============================================================
+
 @app.route('/api/schedule', methods=['GET'])
 @require_auth
 def get_schedule(user_id):
+    """Get schedule for a specific date"""
     try:
         date = request.args.get('date')
         if not date:
-            app.logger.warning(f'ОШИБКА ЗАПРОСА РАСПИСАНИЯ: Пользователь {user_id} - Не указана дата')
+            app.logger.warning(f'SCHEDULE REQUEST ERROR: User {user_id} - Date not specified')
             return jsonify({'error': 'Date is required'}), 400
 
         conn = get_db()
         cursor = conn.cursor(pymysql.cursors.DictCursor)
 
-        # Получаем тип пользователя, ФИО и данные для фильтрации
+        # Get user type, name and filter data
         cursor.execute('''
             SELECT 
                 user_type, 
@@ -1336,18 +496,18 @@ def get_schedule(user_id):
 
         user = cursor.fetchone()
         if not user:
-            app.logger.warning(f'ОШИБКА ЗАПРОСА РАСПИСАНИЯ: Пользователь ID {user_id} не найден')
+            app.logger.warning(f'SCHEDULE REQUEST ERROR: User ID {user_id} not found')
             return jsonify({'error': 'User not found'}), 404
 
-        # Форматируем дату для логов в более читаемом формате
+        # Format date for logs in a more readable format
         display_date = datetime.strptime(date, '%Y-%m-%d').strftime('%d.%m.%Y')
 
-        # Расширенное логирование с ФИО
+        # Enhanced logging with name
         user_type_ru = "преподаватель" if user['user_type'] == 'teacher' else "студент"
         app.logger.info(
-            f'ПРОСМОТР РАСПИСАНИЯ: {user["full_name"]} ({user_type_ru}) запросил расписание на {display_date}')
+            f'SCHEDULE REQUESTED: {user["full_name"]} ({user_type_ru}) requested schedule for {display_date}')
 
-        # Остальной код функции остается неизменным...
+        # Rest of the function remains unchanged
         if user['user_type'] == 'student':
             cursor.execute('''
                 SELECT 
@@ -1397,13 +557,13 @@ def get_schedule(user_id):
 
         schedule = cursor.fetchall()
 
-        # Дополнительный лог о количестве пар в расписании
-        app.logger.info(f'ДАННЫЕ РАСПИСАНИЯ: {user["full_name"]} получил {len(schedule)} пар на {display_date}')
+        # Additional log about number of classes in schedule
+        app.logger.info(f'SCHEDULE DATA: {user["full_name"]} received {len(schedule)} classes for {display_date}')
 
         return jsonify(schedule)
 
     except Exception as e:
-        app.logger.error(f'Ошибка получения расписания для пользователя {user_id}: {str(e)}')
+        app.logger.error(f'Error getting schedule for user {user_id}: {str(e)}')
         return jsonify({'error': str(e)}), 500
 
     finally:
@@ -1411,14 +571,117 @@ def get_schedule(user_id):
             conn.close()
 
 
+@app.route('/api/groups', methods=['GET'])
+def get_groups():
+    """Get list of all groups"""
+    conn = get_db()
+    cursor = conn.cursor()
+
+    try:
+        cursor.execute('SELECT DISTINCT group_name FROM schedule WHERE group_name IS NOT NULL')
+        groups = [row['group_name'] for row in cursor.fetchall()]
+        return jsonify(groups)
+
+    except Exception as e:
+        app.logger.error(f'Groups fetch error: {str(e)}')
+        return jsonify({'error': str(e)}), 500
+
+    finally:
+        conn.close()
+
+
+@app.route('/api/teachers', methods=['GET'])
+def get_teachers():
+    """Get list of all teachers"""
+    conn = get_db()
+    cursor = conn.cursor()
+
+    try:
+        cursor.execute('SELECT DISTINCT teacher_name FROM schedule WHERE teacher_name IS NOT NULL')
+        teachers = [row['teacher_name'] for row in cursor.fetchall()]
+        return jsonify(teachers)
+
+    except Exception as e:
+        app.logger.error(f'Teachers fetch error: {str(e)}')
+        return jsonify({'error': str(e)}), 500
+
+    finally:
+        conn.close()
+
+
+@app.route('/api/schedule/groups', methods=['GET'])
+@require_auth
+def get_teacher_groups(user_id):
+    """Get all groups for a teacher"""
+    conn = get_db()
+    cursor = conn.cursor()
+
+    try:
+        # Get teacher data
+        cursor.execute('SELECT teacher_name, user_type FROM users WHERE id = %s', (user_id,))
+        user = cursor.fetchone()
+
+        if not user or user['user_type'] != 'teacher':
+            return jsonify({'error': 'Access denied'}), 403
+
+        # Get all teacher's groups from the schedule
+        cursor.execute('''
+            SELECT DISTINCT group_name 
+            FROM schedule 
+            WHERE teacher_name = %s
+            ORDER BY group_name
+        ''', (user['teacher_name'],))
+
+        groups = [row['group_name'] for row in cursor.fetchall()]
+        return jsonify(groups)
+
+    except Exception as e:
+        app.logger.error(f'Error getting teacher groups: {str(e)}')
+        return jsonify({'error': str(e)}), 500
+    finally:
+        conn.close()
+
+
+# ============================================================
+# USER PROFILE ROUTES
+# ============================================================
+
+@app.route('/api/profile', methods=['GET'])
+@require_auth
+def get_profile(user_id):
+    """Get user profile"""
+    conn = get_db()
+    cursor = conn.cursor()
+
+    try:
+        cursor.execute('''
+            SELECT id, email, full_name, user_type, group_name, teacher_name
+            FROM users WHERE id = %s
+        ''', (user_id,))
+
+        user = cursor.fetchone()
+        if not user:
+            return jsonify({'error': 'User not found'}), 404
+
+        return jsonify(user)
+
+    except Exception as e:
+        app.logger.error(f'Profile fetch error: {str(e)}')
+        return jsonify({'error': str(e)}), 500
+
+    finally:
+        conn.close()
+
+
 @app.route('/api/profile/details', methods=['GET'])
 @require_auth
 def get_profile_details(user_id):
+    """Get detailed user profile information"""
     try:
         conn = get_db()
         cursor = conn.cursor(pymysql.cursors.DictCursor)
 
-        # Используем CONVERT для правильной кодировки
+        # Use CONVERT for proper encoding
         cursor.execute('''
             SELECT 
                 u.id,
@@ -1454,7 +717,7 @@ def get_profile_details(user_id):
         if not user_details:
             return jsonify({'error': 'User not found'}), 404
 
-        # Получаем статистику
+        # Get statistics
         if user_details['user_type'] == 'student':
             cursor.execute('''
                 SELECT 
@@ -1478,7 +741,7 @@ def get_profile_details(user_id):
 
         stats = cursor.fetchone()
 
-        # Добавляем статистику к деталям пользователя
+        # Add statistics to user details
         if stats:
             user_details.update(stats)
 
@@ -1493,160 +756,241 @@ def get_profile_details(user_id):
             conn.close()
 
 
-# Получение списка групп
-@app.route('/api/groups', methods=['GET'])
-def get_groups():
+@app.route('/api/teachers/my', methods=['GET'])
+@require_auth
+def get_my_teachers(user_id):
+    """Get teachers for a student"""
     conn = get_db()
     cursor = conn.cursor()
 
     try:
-        cursor.execute('SELECT DISTINCT group_name FROM schedule WHERE group_name IS NOT NULL')
-        groups = [row['group_name'] for row in cursor.fetchall()]
-        return jsonify(groups)
+        app.logger.info(f'Getting teachers for student_id: {user_id}')
 
-    except Exception as e:
-        app.logger.error(f'Groups fetch error: {str(e)}')
-        return jsonify({'error': str(e)}), 500
+        # Get student's group
+        cursor.execute('SELECT group_name, user_type FROM users WHERE id = %s', (user_id,))
+        user = cursor.fetchone()
+        app.logger.info(f'Found user: {user}')
 
-    finally:
-        conn.close()
+        if not user:
+            return jsonify({'error': 'User not found'}), 404
 
+        if user['user_type'] != 'student':
+            return jsonify({'error': 'Only students can view teachers'}), 403
 
-# Получение списка преподавателей
-@app.route('/api/teachers', methods=['GET'])
-def get_teachers():
-    conn = get_db()
-    cursor = conn.cursor()
+        if not user['group_name']:
+            return jsonify({'error': 'Student group not found'}), 404
 
-    try:
-        cursor.execute('SELECT DISTINCT teacher_name FROM schedule WHERE teacher_name IS NOT NULL')
-        teachers = [row['teacher_name'] for row in cursor.fetchall()]
+        # Get teachers who teach this group
+        cursor.execute('''
+            SELECT DISTINCT 
+                u.id,
+                u.full_name,
+                u.email,
+                u.teacher_name
+            FROM users u
+            JOIN schedule s ON u.teacher_name = s.teacher_name
+            WHERE s.group_name = %s
+            AND u.user_type = 'teacher'
+            AND u.teacher_name IS NOT NULL
+        ''', (user['group_name'],))
+
+        teachers = cursor.fetchall()
+        app.logger.info(f'Found {len(teachers)} teachers')
+
         return jsonify(teachers)
 
     except Exception as e:
-        app.logger.error(f'Teachers fetch error: {str(e)}')
+        app.logger.error(f'Error in get_my_teachers: {str(e)}')
         return jsonify({'error': str(e)}), 500
-
     finally:
         conn.close()
 
 
-@app.route('/api/schedule/groups', methods=['GET'])
+@app.route('/api/students/my', methods=['GET'])
 @require_auth
-def get_teacher_groups(user_id):
+def get_my_students(user_id):
+    """Get students for a teacher"""
     conn = get_db()
     cursor = conn.cursor()
 
     try:
-        # Получаем данные преподавателя
+        # Get teacher's name
         cursor.execute('SELECT teacher_name, user_type FROM users WHERE id = %s', (user_id,))
         user = cursor.fetchone()
 
         if not user or user['user_type'] != 'teacher':
             return jsonify({'error': 'Access denied'}), 403
 
-        # Получаем все группы преподавателя из всего расписания
-        cursor.execute('''
-            SELECT DISTINCT group_name 
-            FROM schedule 
-            WHERE teacher_name = %s
-            ORDER BY group_name
+        # Get collation of teacher_name column from schedule table
+        cursor.execute(
+            "SELECT COLLATION_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'schedule' AND COLUMN_NAME = 'teacher_name'")
+        result = cursor.fetchone()
+        teacher_name_collation = result['COLLATION_NAME'] if result else 'utf8mb4_0900_ai_ci'  # Default if not found
+
+        # Get all students from groups taught by this teacher (all time)
+        cursor.execute(f'''
+            SELECT DISTINCT
+                u.id,
+                u.full_name,
+                u.email,
+                u.group_name
+            FROM users u
+            WHERE u.group_name IN (
+                SELECT DISTINCT group_name
+                FROM schedule
+                WHERE teacher_name COLLATE {teacher_name_collation} = %s COLLATE {teacher_name_collation}
+            )
+            AND u.user_type = 'student'
+            ORDER BY u.group_name, u.full_name
         ''', (user['teacher_name'],))
 
-        groups = [row['group_name'] for row in cursor.fetchall()]
-        return jsonify(groups)
+        students = cursor.fetchall()
+        app.logger.info(f'Found {len(students)} students for teacher {user["teacher_name"]}')
+
+        return jsonify(students)
 
     except Exception as e:
-        app.logger.error(f'Error getting teacher groups: {str(e)}')
+        app.logger.error(f'Error in get_my_students: {str(e)}')
         return jsonify({'error': str(e)}), 500
     finally:
         conn.close()
 
 
-# Получение профиля пользователя
-@app.route('/api/profile', methods=['GET'])
-@require_auth
-def get_profile(user_id):
-    conn = get_db()
-    cursor = conn.cursor()
+# ============================================================
+# LOGS VIEWING ROUTE
+# ============================================================
 
-    try:
-        cursor.execute('''
-            SELECT id, email, full_name, user_type, group_name, teacher_name
-            FROM users WHERE id = %s
-        ''', (user_id,))
+@app.route('/logs', methods=['GET'])
+def view_logs():
+    """View application logs with filtering options"""
+    lines = request.args.get('lines', default=100, type=int)
+    format_type = request.args.get('format', default='html', type=str)
+    filter_text = request.args.get('filter', default=None, type=str)
+    log_level = request.args.get('level', default=None, type=str)
+    start_date = request.args.get('start_date', default=None, type=str)
+    end_date = request.args.get('end_date', default=None, type=str)
 
-        user = cursor.fetchone()
-        if not user:
-            return jsonify({'error': 'User not found'}), 404
+    # Download raw log file
+    if format_type == 'raw':
+        log_path = os.path.join('logs', app.config['LOG_FILENAME'])
+        if os.path.exists(log_path):
+            return send_file(log_path, mimetype='text/plain')
+        return jsonify({'error': 'Log file not found'}), 404
 
-        return jsonify(user)
+    # For JSON format
+    if format_type == 'json':
+        logs = read_logs(lines, filter_text, log_level, start_date, end_date)
+        return jsonify(logs)
 
-    except Exception as e:
-        app.logger.error(f'Profile fetch error: {str(e)}')
-        return jsonify({'error': str(e)}), 500
+    # Default: HTML format
+    logs = read_logs(lines, filter_text, log_level, start_date, end_date)
 
-    finally:
-        conn.close()
+    # Calculate statistics
+    stats = {
+        'total': len(logs),
+        'info': sum(1 for log in logs if 'INFO' in log and 'ERROR' not in log and 'WARNING' not in log),
+        'warning': sum(1 for log in logs if 'WARNING' in log and 'ERROR' not in log),
+        'error': sum(1 for log in logs if 'ERROR' in log)
+    }
+
+    # Format logs for displaying user names
+    for i, log in enumerate(logs):
+        if "SCHEDULE REQUESTED" in log:
+            logs[i] = log.replace("SCHEDULE REQUESTED", "<strong>ПРОСМОТР РАСПИСАНИЯ</strong>")
+
+    current_time = datetime.now().strftime("%d.%m.%Y %H:%M:%S")
+
+    # HTML template for viewing logs (long template omitted for brevity)
+    html_template = """
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>User Activity Log</title>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <style>
+            /* CSS styles omitted for brevity */
+            body { font-family: 'Segoe UI', Arial, sans-serif; margin: 0; padding: 20px; background-color: #f0f2f5; }
+            .container { max-width: 1300px; margin: 0 auto; background-color: white; padding: 25px; border-radius: 8px; box-shadow: 0 3px 10px rgba(0,0,0,0.1); }
+            .logs { background-color: #f8f9fa; border: 1px solid #dee2e6; border-radius: 6px; padding: 20px; font-family: monospace; white-space: pre-wrap; overflow-x: auto; max-height: 70vh; overflow-y: auto; }
+            .log-line { margin: 8px 0; padding: 10px; border-bottom: 1px solid #eaeaea; border-radius: 4px; }
+            .error { color: #e74c3c; font-weight: bold; background-color: #fdeaea; border-left: 5px solid #e74c3c; }
+            .warning { color: #e67e22; background-color: #fef5ea; border-left: 5px solid #e67e22; }
+            .info { color: #2980b9; background-color: #f0f7fc; border-left: 5px solid #2980b9; }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h1>User Activity Log</h1>
+
+            <!-- Stats -->
+            <div class="stat-box">
+                <div class="stat-item">
+                    <div class="count">{{ stats.total }}</div>
+                    <div class="label">Total entries</div>
+                </div>
+                <div class="stat-item">
+                    <div class="count info-stat">{{ stats.info }}</div>
+                    <div class="label">Information</div>
+                </div>
+                <div class="stat-item">
+                    <div class="count warning-stat">{{ stats.warning }}</div>
+                    <div class="label">Warnings</div>
+                </div>
+                <div class="stat-item">
+                    <div class="count error-stat">{{ stats.error }}</div>
+                    <div class="label">Errors</div>
+                </div>
+            </div>
+
+            <!-- Controls and filters omitted for brevity -->
+
+            <!-- Log display -->
+            <div class="logs">
+                {% for log in logs %}
+                    <div class="log-line 
+                        {% if 'ERROR' in log %}error
+                        {% elif 'WARNING' in log %}warning
+                        {% elif 'INFO' in log %}info{% endif %}
+                        {% if 'SCHEDULE REQUESTED' in log %}schedule-view{% endif %}">
+                        {% if filter_text %}
+                            {{ log|replace(filter_text, '<span class="highlight">' + filter_text + '</span>')|safe }}
+                        {% else %}
+                            {{ log|safe }}
+                        {% endif %}
+                    </div>
+                {% endfor %}
+            </div>
+        </div>
+
+        <script>
+            // JavaScript omitted for brevity
+        </script>
+    </body>
+    </html>
+    """
+
+    return render_template_string(
+        html_template,
+        logs=logs,
+        lines=lines,
+        current_time=current_time,
+        filter_text=filter_text,
+        log_level=log_level,
+        start_date=start_date,
+        end_date=end_date,
+        stats=stats
+    )
 
 
-# Add these imports if not already present
-import re
-import json
-from datetime import datetime, timedelta, date
-import calendar
+# ============================================================
+# ADMIN ROUTES
+# ============================================================
 
-
-# Admin authorization middleware
-def require_admin(f):
-    @wraps(f)
-    def decorated(*args, **kwargs):
-        auth_header = request.headers.get('Authorization')
-
-        if not auth_header:
-            return jsonify({'error': 'Authorization header is missing'}), 401
-
-        try:
-            parts = auth_header.split()
-            if parts[0].lower() != 'bearer' or len(parts) != 2:
-                return jsonify({'error': 'Invalid authorization format'}), 401
-
-            token = parts[1]
-            payload = jwt.decode(token, app.config['SECRET_KEY'], algorithms=['HS256'])
-            user_id = payload['user_id']
-
-            conn = get_db()
-            cursor = conn.cursor()
-            cursor.execute('SELECT id, user_type FROM users WHERE id = %s', (user_id,))
-            user = cursor.fetchone()
-            conn.close()
-
-            if not user:
-                return jsonify({'error': 'User not found'}), 401
-
-            if user['user_type'] != 'admin':
-                return jsonify({'error': 'Admin access required'}), 403
-
-            # Log admin access
-            app.logger.info(f'ADMIN ACCESS: User ID {user_id} accessed admin API: {request.path}')
-
-            return f(user_id, *args, **kwargs)
-
-        except jwt.ExpiredSignatureError:
-            return jsonify({'error': 'Token has expired'}), 401
-        except jwt.InvalidTokenError:
-            return jsonify({'error': 'Invalid token'}), 401
-        except Exception as e:
-            app.logger.error(f'Admin auth error: {str(e)}')
-            return jsonify({'error': str(e)}), 500
-
-    return decorated
-
-
-# Admin Dashboard Statistics
 @app.route('/api/admin/dashboard/stats', methods=['GET'])
 @require_admin
 def admin_dashboard_stats(admin_id):
+    """Get admin dashboard statistics"""
     conn = get_db()
     cursor = conn.cursor()
 
@@ -1667,25 +1011,15 @@ def admin_dashboard_stats(admin_id):
         cursor.execute("SELECT COUNT(*) as count FROM schedule")
         lessons_count = cursor.fetchone()['count']
 
-        # Get active users (users who logged in within the last 24 hours)
-        # This would require a separate table to track user logins, for now using a placeholder
-        active_users = 0
-
-        # Get pending requests (e.g., new user registrations to approve)
-        # This would require additional tables, for now using a placeholder
-        pending_requests = 0
-
         stats = {
             'totalStudents': students_count,
             'totalTeachers': teachers_count,
             'totalCourses': courses_count,
-            'totalLessons': lessons_count,
-            'activeUsers': active_users,
-            'pendingRequests': pending_requests
+            'totalLessons': lessons_count
         }
 
         # Log admin action
-        app.logger.info(f'ADMIN STATS: Admin ID {admin_id} viewed dashboard statistics')
+        log_admin_activity(admin_id, "viewed dashboard statistics")
 
         return jsonify(stats)
 
@@ -1697,30 +1031,16 @@ def admin_dashboard_stats(admin_id):
         conn.close()
 
 
-# Admin Activity Log
 @app.route('/api/admin/activity-log', methods=['GET'])
 @require_admin
 def admin_activity_log(admin_id):
+    """Get admin activity log"""
     limit = int(request.args.get('limit', 10))
     offset = int(request.args.get('offset', 0))
     conn = get_db()
     cursor = conn.cursor()
 
     try:
-        # Create activity log table if it doesn't exist
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS admin_activity_log (
-                id INT AUTO_INCREMENT PRIMARY KEY,
-                admin_id INT NOT NULL,
-                admin_name VARCHAR(255) NOT NULL,
-                action VARCHAR(255) NOT NULL,
-                details TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (admin_id) REFERENCES users(id)
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-        ''')
-        conn.commit()
-
         # Get activity logs with admin name
         cursor.execute('''
             SELECT al.*, u.full_name as admin_name 
@@ -1742,38 +1062,10 @@ def admin_activity_log(admin_id):
         conn.close()
 
 
-# Helper function to log admin activity
-def log_admin_activity(admin_id, action, details=None):
-    conn = get_db()
-    cursor = conn.cursor()
-
-    try:
-        # Get admin name
-        cursor.execute('SELECT full_name FROM users WHERE id = %s', (admin_id,))
-        admin = cursor.fetchone()
-        admin_name = admin['full_name'] if admin else 'Unknown Admin'
-
-        # Log the activity
-        cursor.execute('''
-            INSERT INTO admin_activity_log 
-            (admin_id, admin_name, action, details) 
-            VALUES (%s, %s, %s, %s)
-        ''', (admin_id, admin_name, action, details))
-
-        conn.commit()
-        app.logger.info(f'ADMIN ACTION: {admin_name} ({admin_id}) {action} {details or ""}')
-
-    except Exception as e:
-        conn.rollback()
-        app.logger.error(f'Error logging admin activity: {str(e)}')
-    finally:
-        conn.close()
-
-
-# Get all users (with filtering and pagination)
 @app.route('/api/admin/users', methods=['GET'])
 @require_admin
 def admin_get_users(admin_id):
+    """Get all users with filtering and pagination"""
     user_type = request.args.get('type')  # Filter by user type
     search = request.args.get('search')  # Search by name, email, group
     limit = int(request.args.get('limit', 50))
@@ -1817,8 +1109,8 @@ def admin_get_users(admin_id):
         users = cursor.fetchall()
 
         # Log admin action
-        log_admin_activity(admin_id, "просмотр списка пользователей",
-                           f"Найдено {len(users)} пользователей")
+        log_admin_activity(admin_id, "viewed user list",
+                           f"Found {len(users)} users")
 
         return jsonify(users)
 
@@ -1830,10 +1122,10 @@ def admin_get_users(admin_id):
         conn.close()
 
 
-# Get a single user
 @app.route('/api/admin/users/<int:user_id>', methods=['GET'])
 @require_admin
 def admin_get_user(admin_id, user_id):
+    """Get a single user by ID"""
     conn = get_db()
     cursor = conn.cursor()
 
@@ -1852,7 +1144,7 @@ def admin_get_user(admin_id, user_id):
             return jsonify({'error': 'User not found'}), 404
 
         # Log admin action
-        log_admin_activity(admin_id, "просмотр пользователя",
+        log_admin_activity(admin_id, "viewed user",
                            f"ID: {user_id}, Email: {user['email']}")
 
         return jsonify(user)
@@ -1865,10 +1157,10 @@ def admin_get_user(admin_id, user_id):
         conn.close()
 
 
-# Create a new user
 @app.route('/api/admin/users', methods=['POST'])
 @require_admin
 def admin_create_user(admin_id):
+    """Create a new user"""
     data = request.get_json()
     conn = get_db()
     cursor = conn.cursor()
@@ -1918,8 +1210,8 @@ def admin_create_user(admin_id):
         user = cursor.fetchone()
 
         # Log admin action
-        log_admin_activity(admin_id, "создание пользователя",
-                           f"ID: {user_id}, Email: {data['email']}, Тип: {data['userType']}")
+        log_admin_activity(admin_id, "created user",
+                           f"ID: {user_id}, Email: {data['email']}, Type: {data['userType']}")
 
         return jsonify(user)
 
@@ -1932,10 +1224,10 @@ def admin_create_user(admin_id):
         conn.close()
 
 
-# Update a user
 @app.route('/api/admin/users/<int:user_id>', methods=['PUT'])
 @require_admin
 def admin_update_user(admin_id, user_id):
+    """Update a user"""
     data = request.get_json()
     conn = get_db()
     cursor = conn.cursor()
@@ -2013,8 +1305,8 @@ def admin_update_user(admin_id, user_id):
 
         # Log admin action
         field_changes = ', '.join([f"{k}: {v}" for k, v in data.items() if k != 'password'])
-        log_admin_activity(admin_id, "обновление пользователя",
-                           f"ID: {user_id}, Изменения: {field_changes}")
+        log_admin_activity(admin_id, "updated user",
+                           f"ID: {user_id}, Changes: {field_changes}")
 
         return jsonify(updated_user)
 
@@ -2027,10 +1319,10 @@ def admin_update_user(admin_id, user_id):
         conn.close()
 
 
-# Delete a user
 @app.route('/api/admin/users/<int:user_id>', methods=['DELETE'])
 @require_admin
 def admin_delete_user(admin_id, user_id):
+    """Delete a user"""
     conn = get_db()
     cursor = conn.cursor()
 
@@ -2051,8 +1343,8 @@ def admin_delete_user(admin_id, user_id):
         conn.commit()
 
         # Log admin action
-        log_admin_activity(admin_id, "удаление пользователя",
-                           f"ID: {user_id}, Email: {user['email']}, ФИО: {user['full_name']}")
+        log_admin_activity(admin_id, "deleted user",
+                           f"ID: {user_id}, Email: {user['email']}, Name: {user['full_name']}")
 
         return jsonify({'success': True, 'message': 'User deleted successfully'})
 
@@ -2065,10 +1357,10 @@ def admin_delete_user(admin_id, user_id):
         conn.close()
 
 
-# Get all schedules with filtering
 @app.route('/api/admin/schedules', methods=['GET'])
 @require_admin
 def admin_get_schedules(admin_id):
+    """Get all schedules with filtering"""
     # Parse query parameters
     date = request.args.get('date')
     date_from = request.args.get('date_from')
@@ -2123,14 +1415,14 @@ def admin_get_schedules(admin_id):
         schedules = cursor.fetchall()
 
         # Log admin action
-        filter_desc = f"Фильтры: " + ", ".join([
-            f"дата={date}" if date else "",
-            f"с {date_from} по {date_to}" if date_from and date_to else "",
-            f"поиск={search}" if search else ""
+        filter_desc = f"Filters: " + ", ".join([
+            f"date={date}" if date else "",
+            f"from {date_from} to {date_to}" if date_from and date_to else "",
+            f"search={search}" if search else ""
         ]).strip(", ")
 
-        log_admin_activity(admin_id, "просмотр расписания",
-                           f"Найдено {len(schedules)} записей. {filter_desc}")
+        log_admin_activity(admin_id, "viewed schedule",
+                           f"Found {len(schedules)} entries. {filter_desc}")
 
         return jsonify(schedules)
 
@@ -2142,10 +1434,10 @@ def admin_get_schedules(admin_id):
         conn.close()
 
 
-# Get a single schedule item
 @app.route('/api/admin/schedule/<int:schedule_id>', methods=['GET'])
 @require_admin
 def admin_get_schedule(admin_id, schedule_id):
+    """Get a single schedule item"""
     conn = get_db()
     cursor = conn.cursor()
 
@@ -2167,8 +1459,8 @@ def admin_get_schedule(admin_id, schedule_id):
             return jsonify({'error': 'Schedule not found'}), 404
 
         # Log admin action
-        log_admin_activity(admin_id, "просмотр записи расписания",
-                           f"ID: {schedule_id}, Предмет: {schedule['subject']}")
+        log_admin_activity(admin_id, "viewed schedule entry",
+                           f"ID: {schedule_id}, Subject: {schedule['subject']}")
 
         return jsonify(schedule)
 
@@ -2180,10 +1472,10 @@ def admin_get_schedule(admin_id, schedule_id):
         conn.close()
 
 
-# Create a new schedule item
 @app.route('/api/admin/schedule', methods=['POST'])
 @require_admin
 def admin_create_schedule(admin_id):
+    """Create a new schedule item"""
     data = request.get_json()
     conn = get_db()
     cursor = conn.cursor()
@@ -2238,8 +1530,8 @@ def admin_create_schedule(admin_id):
         schedule = cursor.fetchone()
 
         # Log admin action
-        log_admin_activity(admin_id, "создание занятия",
-                           f"ID: {schedule_id}, Предмет: {data['subject']}, Группа: {data['group_name']}")
+        log_admin_activity(admin_id, "created schedule entry",
+                           f"ID: {schedule_id}, Subject: {data['subject']}, Group: {data['group_name']}")
 
         return jsonify(schedule)
 
@@ -2252,10 +1544,10 @@ def admin_create_schedule(admin_id):
         conn.close()
 
 
-# Update a schedule item
 @app.route('/api/admin/schedule/<int:schedule_id>', methods=['PUT'])
 @require_admin
 def admin_update_schedule(admin_id, schedule_id):
+    """Update a schedule item"""
     data = request.get_json()
     conn = get_db()
     cursor = conn.cursor()
@@ -2324,8 +1616,8 @@ def admin_update_schedule(admin_id, schedule_id):
 
         # Log admin action
         field_changes = ', '.join([f"{k}: {v}" for k, v in data.items()])
-        log_admin_activity(admin_id, "обновление занятия",
-                           f"ID: {schedule_id}, Изменения: {field_changes}")
+        log_admin_activity(admin_id, "updated schedule entry",
+                           f"ID: {schedule_id}, Changes: {field_changes}")
 
         return jsonify(updated_schedule)
 
@@ -2338,10 +1630,10 @@ def admin_update_schedule(admin_id, schedule_id):
         conn.close()
 
 
-# Delete a schedule item
 @app.route('/api/admin/schedule/<int:schedule_id>', methods=['DELETE'])
 @require_admin
 def admin_delete_schedule(admin_id, schedule_id):
+    """Delete a schedule item"""
     conn = get_db()
     cursor = conn.cursor()
 
@@ -2358,8 +1650,8 @@ def admin_delete_schedule(admin_id, schedule_id):
         conn.commit()
 
         # Log admin action
-        log_admin_activity(admin_id, "удаление занятия",
-                           f"ID: {schedule_id}, Предмет: {schedule['subject']}, Группа: {schedule['group_name']}")
+        log_admin_activity(admin_id, "deleted schedule entry",
+                           f"ID: {schedule_id}, Subject: {schedule['subject']}, Group: {schedule['group_name']}")
 
         return jsonify({'success': True, 'message': 'Schedule deleted successfully'})
 
@@ -2372,25 +1664,10 @@ def admin_delete_schedule(admin_id, schedule_id):
         conn.close()
 
 
-# Get requests (placeholder for now, could be admission requests, support tickets, etc.)
-@app.route('/api/admin/requests', methods=['GET'])
-@require_admin
-def admin_get_requests(admin_id):
-    # This is a placeholder endpoint
-    # In a real application, you would query a table of requests or tickets
-
-    # Log admin action
-    log_admin_activity(admin_id, "просмотр запросов",
-                       "Просмотр списка запросов пользователей")
-
-    # Return empty list for now
-    return jsonify([])
-
-
-# Analytics endpoints
 @app.route('/api/admin/analytics/users', methods=['GET'])
 @require_admin
 def admin_analytics_users(admin_id):
+    """Get user analytics for admin dashboard"""
     conn = get_db()
     cursor = conn.cursor()
 
@@ -2422,8 +1699,8 @@ def admin_analytics_users(admin_id):
         user_types = cursor.fetchall()
 
         # Log admin action
-        log_admin_activity(admin_id, "просмотр аналитики пользователей",
-                           "Статистика регистраций и распределение по типам")
+        log_admin_activity(admin_id, "viewed user analytics",
+                           "Registration statistics and type distribution")
 
         return jsonify({
             'monthlyRegistrations': monthly_registrations,
@@ -2441,6 +1718,7 @@ def admin_analytics_users(admin_id):
 @app.route('/api/admin/analytics/schedule', methods=['GET'])
 @require_admin
 def admin_analytics_schedule(admin_id):
+    """Get schedule analytics for admin dashboard"""
     conn = get_db()
     cursor = conn.cursor()
 
@@ -2496,8 +1774,8 @@ def admin_analytics_schedule(admin_id):
         top_subjects = cursor.fetchall()
 
         # Log admin action
-        log_admin_activity(admin_id, "просмотр аналитики расписания",
-                           "Статистика распределения занятий")
+        log_admin_activity(admin_id, "viewed schedule analytics",
+                           "Schedule distribution statistics")
 
         return jsonify({
             'weekdayDistribution': weekday_distribution,
@@ -2514,46 +1792,10 @@ def admin_analytics_schedule(admin_id):
         conn.close()
 
 
-# Admin settings endpoints
-@app.route('/api/admin/settings', methods=['GET'])
-@require_admin
-def admin_get_settings(admin_id):
-    # Placeholder for system settings
-    # In a real application, you would have a settings table
+# ============================================================
+# SERVER STARTUP
+# ============================================================
 
-    # Log admin action
-    log_admin_activity(admin_id, "просмотр настроек системы",
-                       "Просмотр системных настроек")
-
-    # Return placeholder settings
-    return jsonify({
-        'appName': 'University App',
-        'maintenanceMode': False,
-        'allowRegistration': True,
-        'maxFileSize': 5,  # MB
-        'logRetentionDays': 30
-    })
-
-
-@app.route('/api/admin/settings', methods=['PUT'])
-@require_admin
-def admin_update_settings(admin_id):
-    # Placeholder for updating system settings
-    data = request.get_json()
-
-    # Log admin action
-    settings_changes = ', '.join([f"{k}: {v}" for k, v in data.items()])
-    log_admin_activity(admin_id, "обновление настроек системы",
-                       f"Изменения: {settings_changes}")
-
-    # In a real application, you would update a settings table
-    return jsonify({
-        'success': True,
-        'message': 'Settings updated successfully'
-    })
-
-
-# Запуск сервера
 if __name__ == '__main__':
     init_db()
-    socketio.run(app, debug=True, host='0.0.0.0', port=5000)
+    app.run(debug=True, host='0.0.0.0', port=5000)

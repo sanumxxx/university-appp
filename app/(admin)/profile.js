@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import {
   View,
   StyleSheet,
@@ -7,8 +7,7 @@ import {
   Alert,
   ScrollView,
   Switch,
-  Platform,
-  ActivityIndicator,
+  ActivityIndicator
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -16,51 +15,24 @@ import { useAuth } from '../../context/auth';
 import { router } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-export default function Profile() {
-  // Важно: все хуки должны вызываться на верхнем уровне компонента
-  const { user, logout, isAdmin } = useAuth();
+export default function AdminProfile() {
+  const { user, logout } = useAuth();
   const [pushNotifications, setPushNotifications] = useState(true);
   const [isLoading, setIsLoading] = useState(false);
 
-  // Проверка и перенаправление админа
-  useEffect(() => {
-    if (user && user.userType === 'admin') {
-      // Перенаправляем админа на его собственную страницу профиля
-      router.replace('/(admin)/profile');
-    }
-  }, [user]);
-
-  // Загрузка настроек
-  useEffect(() => {
-    loadSettings();
-  }, []);
-
-  const loadSettings = async () => {
-    try {
-      const notifications = await AsyncStorage.getItem('pushNotifications');
-      setPushNotifications(notifications !== 'false');
-    } catch (error) {
-      console.error('Error loading settings:', error);
-    }
-  };
-
-  // Если пользователь - админ, делаем заглушку во время перенаправления
-  if (user && user.userType === 'admin') {
-    return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#007AFF" />
-        <Text style={styles.loadingText}>Переход в панель администратора...</Text>
-      </View>
-    );
-  }
-
-  // Если пользователь не авторизован, показываем загрузку
   if (!user) {
     return (
       <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color="#007AFF" />
       </View>
     );
+  }
+
+  // Verify this is an admin user
+  if (user.userType !== 'admin') {
+    // Redirect to the admin dashboard if somehow a non-admin user reached this page
+    router.replace('/(admin)/dashboard');
+    return null;
   }
 
   const handleLogout = () => {
@@ -100,25 +72,27 @@ export default function Profile() {
     }
   };
 
-  // Определяем имя пользователя в зависимости от типа
-  const userType = user.userType || 'student';
-  const userName = userType === 'teacher'
-    ? (user.teacher || user.fullName || user.full_name)
-    : (user.fullName || user.full_name);
-
-  // Получаем первые буквы имени для аватара
+  // Get initials for avatar
   const getInitials = () => {
-    const nameParts = userName.split(' ');
+    const fullName = user.fullName || user.full_name || 'Admin User';
+    const nameParts = fullName.split(' ');
     if (nameParts.length >= 2) {
       return `${nameParts[0].charAt(0)}${nameParts[1].charAt(0)}`.toUpperCase();
     }
-    return userName.charAt(0).toUpperCase();
+    return fullName.charAt(0).toUpperCase();
   };
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>Профиль</Text>
+        <TouchableOpacity
+          style={styles.backButton}
+          onPress={() => router.push('/(admin)/dashboard')}
+        >
+          <Ionicons name="chevron-back" size={24} color="#007AFF" />
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>Профиль администратора</Text>
+        <View style={{width: 36}} />
       </View>
 
       <ScrollView
@@ -126,7 +100,7 @@ export default function Profile() {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        {/* Карточка профиля */}
+        {/* Profile Card */}
         <View style={styles.profileCard}>
           <View style={styles.avatarContainer}>
             <View style={styles.avatar}>
@@ -135,16 +109,8 @@ export default function Profile() {
           </View>
 
           <View style={styles.profileInfo}>
-            <Text style={styles.userName}>{userName}</Text>
-            <Text style={styles.userRole}>
-              {userType === 'teacher' ? 'Преподаватель' : 'Студент'}
-            </Text>
-            {userType === 'student' && user.group_name && (
-              <View style={styles.infoRow}>
-                <Ionicons name="people-outline" size={16} color="#8E8E93" />
-                <Text style={styles.infoText}>{user.group_name || user.group}</Text>
-              </View>
-            )}
+            <Text style={styles.userName}>{user.fullName || user.full_name}</Text>
+            <Text style={styles.userRole}>Администратор</Text>
             <View style={styles.infoRow}>
               <Ionicons name="mail-outline" size={16} color="#8E8E93" />
               <Text style={styles.infoText}>{user.email}</Text>
@@ -152,14 +118,60 @@ export default function Profile() {
           </View>
         </View>
 
-        {/* Учетная запись */}
+        {/* Admin Navigation */}
+        <View style={styles.section}>
+          <Text style={styles.sectionHeader}>Управление системой</Text>
+
+          <View style={styles.card}>
+            <TouchableOpacity
+              style={styles.cardItem}
+              onPress={() => router.push('/(admin)/dashboard')}
+            >
+              <View style={styles.itemLeft}>
+                <View style={[styles.iconBg, { backgroundColor: '#5F66F2' }]}>
+                  <Ionicons name="grid-outline" size={16} color="#FFFFFF" />
+                </View>
+                <Text style={styles.itemText}>Панель управления</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color="#C7C7CC" />
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.cardItem}
+              onPress={() => router.push('/(admin)/users')}
+            >
+              <View style={styles.itemLeft}>
+                <View style={[styles.iconBg, { backgroundColor: '#34C759' }]}>
+                  <Ionicons name="people-outline" size={16} color="#FFFFFF" />
+                </View>
+                <Text style={styles.itemText}>Управление пользователями</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color="#C7C7CC" />
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.cardItem}
+              onPress={() => router.push('/(admin)/schedule')}
+            >
+              <View style={styles.itemLeft}>
+                <View style={[styles.iconBg, { backgroundColor: '#007AFF' }]}>
+                  <Ionicons name="calendar-outline" size={16} color="#FFFFFF" />
+                </View>
+                <Text style={styles.itemText}>Управление расписанием</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color="#C7C7CC" />
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        {/* Account Settings */}
         <View style={styles.section}>
           <Text style={styles.sectionHeader}>Учетная запись</Text>
 
           <View style={styles.card}>
             <TouchableOpacity style={styles.cardItem}>
               <View style={styles.itemLeft}>
-                <View style={[styles.iconBg, { backgroundColor: '#34C759' }]}>
+                <View style={[styles.iconBg, { backgroundColor: '#FF9500' }]}>
                   <Ionicons name="person-outline" size={16} color="#FFFFFF" />
                 </View>
                 <Text style={styles.itemText}>Личные данные</Text>
@@ -169,7 +181,7 @@ export default function Profile() {
 
             <TouchableOpacity style={styles.cardItem}>
               <View style={styles.itemLeft}>
-                <View style={[styles.iconBg, { backgroundColor: '#007AFF' }]}>
+                <View style={[styles.iconBg, { backgroundColor: '#FF2D55' }]}>
                   <Ionicons name="lock-closed-outline" size={16} color="#FFFFFF" />
                 </View>
                 <Text style={styles.itemText}>Изменить пароль</Text>
@@ -179,14 +191,14 @@ export default function Profile() {
           </View>
         </View>
 
-        {/* Настройки */}
+        {/* Settings */}
         <View style={styles.section}>
           <Text style={styles.sectionHeader}>Настройки</Text>
 
           <View style={styles.card}>
             <View style={styles.cardItem}>
               <View style={styles.itemLeft}>
-                <View style={[styles.iconBg, { backgroundColor: '#FF9500' }]}>
+                <View style={[styles.iconBg, { backgroundColor: '#5AC8FA' }]}>
                   <Ionicons name="notifications-outline" size={16} color="#FFFFFF" />
                 </View>
                 <Text style={styles.itemText}>Push-уведомления</Text>
@@ -208,60 +220,10 @@ export default function Profile() {
               </View>
               <Text style={styles.itemNote}>Скоро</Text>
             </TouchableOpacity>
-
-            <TouchableOpacity style={styles.cardItem}>
-              <View style={styles.itemLeft}>
-                <View style={[styles.iconBg, { backgroundColor: '#007AFF' }]}>
-                  <Ionicons name="language-outline" size={16} color="#FFFFFF" />
-                </View>
-                <Text style={styles.itemText}>Язык</Text>
-              </View>
-              <View style={styles.itemRight}>
-                <Text style={styles.itemValue}>Русский</Text>
-                <Ionicons name="chevron-forward" size={18} color="#C7C7CC" />
-              </View>
-            </TouchableOpacity>
           </View>
         </View>
 
-        {/* Информация */}
-        <View style={styles.section}>
-          <Text style={styles.sectionHeader}>Информация</Text>
-
-          <View style={styles.card}>
-            <TouchableOpacity style={styles.cardItem}>
-              <View style={styles.itemLeft}>
-                <View style={[styles.iconBg, { backgroundColor: '#FF2D55' }]}>
-                  <Ionicons name="help-circle-outline" size={16} color="#FFFFFF" />
-                </View>
-                <Text style={styles.itemText}>Поддержка</Text>
-              </View>
-              <Ionicons name="chevron-forward" size={18} color="#C7C7CC" />
-            </TouchableOpacity>
-
-            <TouchableOpacity style={styles.cardItem}>
-              <View style={styles.itemLeft}>
-                <View style={[styles.iconBg, { backgroundColor: '#FF9500' }]}>
-                  <Ionicons name="document-text-outline" size={16} color="#FFFFFF" />
-                </View>
-                <Text style={styles.itemText}>Условия использования</Text>
-              </View>
-              <Ionicons name="chevron-forward" size={18} color="#C7C7CC" />
-            </TouchableOpacity>
-
-            <TouchableOpacity style={styles.cardItem}>
-              <View style={styles.itemLeft}>
-                <View style={[styles.iconBg, { backgroundColor: '#5AC8FA' }]}>
-                  <Ionicons name="information-circle-outline" size={16} color="#FFFFFF" />
-                </View>
-                <Text style={styles.itemText}>О приложении</Text>
-              </View>
-              <Ionicons name="chevron-forward" size={18} color="#C7C7CC" />
-            </TouchableOpacity>
-          </View>
-        </View>
-
-        {/* Кнопка выхода */}
+        {/* Logout Button */}
         <TouchableOpacity
           style={styles.logoutButton}
           onPress={handleLogout}
@@ -274,7 +236,7 @@ export default function Profile() {
           )}
         </TouchableOpacity>
 
-        {/* Версия приложения */}
+        {/* App Version */}
         <View style={styles.versionContainer}>
           <Text style={styles.versionText}>Версия alpha-0.4 25.03.2025</Text>
         </View>
@@ -294,22 +256,28 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: '#F2F2F7',
   },
-  loadingText: {
-    marginTop: 12,
-    fontSize: 16,
-    color: '#8E8E93',
-  },
   header: {
-    padding: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 16,
+    paddingHorizontal: 20,
     backgroundColor: '#FFFFFF',
     borderBottomWidth: 1,
     borderBottomColor: '#E5E5EA',
   },
+  backButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#F5F5F5',
+  },
   headerTitle: {
-    fontSize: 17,
+    fontSize: 18,
     fontWeight: '600',
-    color: '#000000',
-    textAlign: 'center',
+    color: '#151940',
   },
   scrollView: {
     flex: 1,
@@ -322,6 +290,7 @@ const styles = StyleSheet.create({
     paddingVertical: 20,
     paddingHorizontal: 16,
     alignItems: 'center',
+    marginBottom: 20,
   },
   avatarContainer: {
     marginBottom: 16,
@@ -330,7 +299,7 @@ const styles = StyleSheet.create({
     width: 80,
     height: 80,
     borderRadius: 40,
-    backgroundColor: '#007AFF',
+    backgroundColor: '#5F66F2', // Admin-specific color
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -351,7 +320,8 @@ const styles = StyleSheet.create({
   },
   userRole: {
     fontSize: 17,
-    color: '#8E8E93',
+    color: '#5F66F2', // Admin-specific color
+    fontWeight: '600',
     marginBottom: 8,
   },
   infoRow: {
@@ -377,7 +347,7 @@ const styles = StyleSheet.create({
   },
   card: {
     backgroundColor: '#FFFFFF',
-    borderRadius: Platform.OS === 'ios' ? 10 : 0,
+    borderRadius: 10,
     overflow: 'hidden',
   },
   cardItem: {
@@ -405,25 +375,16 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#000000',
   },
-  itemRight: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  itemValue: {
-    fontSize: 16,
-    color: '#8E8E93',
-    marginRight: 6,
-  },
   itemNote: {
     fontSize: 15,
     color: '#8E8E93',
   },
   logoutButton: {
     backgroundColor: '#FF3B30',
-    marginTop: 20,
+    marginTop: 30,
     marginHorizontal: 16,
     paddingVertical: 14,
-    borderRadius: Platform.OS === 'ios' ? 10 : 0,
+    borderRadius: 10,
     alignItems: 'center',
   },
   logoutText: {
