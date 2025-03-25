@@ -1590,6 +1590,969 @@ def get_profile(user_id):
         conn.close()
 
 
+# Add these imports if not already present
+import re
+import json
+from datetime import datetime, timedelta, date
+import calendar
+
+
+# Admin authorization middleware
+def require_admin(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        auth_header = request.headers.get('Authorization')
+
+        if not auth_header:
+            return jsonify({'error': 'Authorization header is missing'}), 401
+
+        try:
+            parts = auth_header.split()
+            if parts[0].lower() != 'bearer' or len(parts) != 2:
+                return jsonify({'error': 'Invalid authorization format'}), 401
+
+            token = parts[1]
+            payload = jwt.decode(token, app.config['SECRET_KEY'], algorithms=['HS256'])
+            user_id = payload['user_id']
+
+            conn = get_db()
+            cursor = conn.cursor()
+            cursor.execute('SELECT id, user_type FROM users WHERE id = %s', (user_id,))
+            user = cursor.fetchone()
+            conn.close()
+
+            if not user:
+                return jsonify({'error': 'User not found'}), 401
+
+            if user['user_type'] != 'admin':
+                return jsonify({'error': 'Admin access required'}), 403
+
+            # Log admin access
+            app.logger.info(f'ADMIN ACCESS: User ID {user_id} accessed admin API: {request.path}')
+
+            return f(user_id, *args, **kwargs)
+
+        except jwt.ExpiredSignatureError:
+            return jsonify({'error': 'Token has expired'}), 401
+        except jwt.InvalidTokenError:
+            return jsonify({'error': 'Invalid token'}), 401
+        except Exception as e:
+            app.logger.error(f'Admin auth error: {str(e)}')
+            return jsonify({'error': str(e)}), 500
+
+    return decorated
+
+
+# Admin Dashboard Statistics
+@app.route('/api/admin/dashboard/stats', methods=['GET'])
+@require_admin
+def admin_dashboard_stats(admin_id):
+    conn = get_db()
+    cursor = conn.cursor()
+
+    try:
+        # Get total students count
+        cursor.execute("SELECT COUNT(*) as count FROM users WHERE user_type = 'student'")
+        students_count = cursor.fetchone()['count']
+
+        # Get total teachers count
+        cursor.execute("SELECT COUNT(*) as count FROM users WHERE user_type = 'teacher'")
+        teachers_count = cursor.fetchone()['count']
+
+        # Get total courses/subjects count
+        cursor.execute("SELECT COUNT(DISTINCT subject) as count FROM schedule")
+        courses_count = cursor.fetchone()['count']
+
+        # Get total lessons count
+        cursor.execute("SELECT COUNT(*) as count FROM schedule")
+        lessons_count = cursor.fetchone()['count']
+
+        # Get active users (users who logged in within the last 24 hours)
+        # This would require a separate table to track user logins, for now using a placeholder
+        active_users = 0
+
+        # Get pending requests (e.g., new user registrations to approve)
+        # This would require additional tables, for now using a placeholder
+        pending_requests = 0
+
+        stats = {
+            'totalStudents': students_count,
+            'totalTeachers': teachers_count,
+            'totalCourses': courses_count,
+            'totalLessons': lessons_count,
+            'activeUsers': active_users,
+            'pendingRequests': pending_requests
+        }
+
+        # Log admin action
+        app.logger.info(f'ADMIN STATS: Admin ID {admin_id} viewed dashboard statistics')
+
+        return jsonify(stats)
+
+    except Exception as e:
+        app.logger.error(f'Admin dashboard stats error: {str(e)}')
+        return jsonify({'error': str(e)}), 500
+
+    finally:
+        conn.close()
+
+
+# Admin Activity Log
+@app.route('/api/admin/activity-log', methods=['GET'])
+@require_admin
+def admin_activity_log(admin_id):
+    limit = int(request.args.get('limit', 10))
+    offset = int(request.args.get('offset', 0))
+    conn = get_db()
+    cursor = conn.cursor()
+
+    try:
+        # Create activity log table if it doesn't exist
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS admin_activity_log (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                admin_id INT NOT NULL,
+                admin_name VARCHAR(255) NOT NULL,
+                action VARCHAR(255) NOT NULL,
+                details TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (admin_id) REFERENCES users(id)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        ''')
+        conn.commit()
+
+        # Get activity logs with admin name
+        cursor.execute('''
+            SELECT al.*, u.full_name as admin_name 
+            FROM admin_activity_log al
+            JOIN users u ON al.admin_id = u.id
+            ORDER BY al.created_at DESC
+            LIMIT %s OFFSET %s
+        ''', (limit, offset))
+
+        logs = cursor.fetchall()
+
+        return jsonify({'logs': logs})
+
+    except Exception as e:
+        app.logger.error(f'Admin activity log error: {str(e)}')
+        return jsonify({'error': str(e)}), 500
+
+    finally:
+        conn.close()
+
+
+# Helper function to log admin activity
+def log_admin_activity(admin_id, action, details=None):
+    conn = get_db()
+    cursor = conn.cursor()
+
+    try:
+        # Get admin name
+        cursor.execute('SELECT full_name FROM users WHERE id = %s', (admin_id,))
+        admin = cursor.fetchone()
+        admin_name = admin['full_name'] if admin else 'Unknown Admin'
+
+        # Log the activity
+        cursor.execute('''
+            INSERT INTO admin_activity_log 
+            (admin_id, admin_name, action, details) 
+            VALUES (%s, %s, %s, %s)
+        ''', (admin_id, admin_name, action, details))
+
+        conn.commit()
+        app.logger.info(f'ADMIN ACTION: {admin_name} ({admin_id}) {action} {details or ""}')
+
+    except Exception as e:
+        conn.rollback()
+        app.logger.error(f'Error logging admin activity: {str(e)}')
+    finally:
+        conn.close()
+
+
+# Get all users (with filtering and pagination)
+@app.route('/api/admin/users', methods=['GET'])
+@require_admin
+def admin_get_users(admin_id):
+    user_type = request.args.get('type')  # Filter by user type
+    search = request.args.get('search')  # Search by name, email, group
+    limit = int(request.args.get('limit', 50))
+    offset = int(request.args.get('offset', 0))
+
+    conn = get_db()
+    cursor = conn.cursor()
+
+    try:
+        # Build the query with optional filters
+        query = '''
+            SELECT 
+                id, email, full_name, user_type, group_name, teacher_name, 
+                status, created_at, updated_at
+            FROM users
+            WHERE 1=1
+        '''
+        params = []
+
+        # Add user type filter if provided
+        if user_type and user_type != 'all':
+            query += ' AND user_type = %s'
+            params.append(user_type)
+
+        # Add search filter if provided
+        if search:
+            query += ''' AND (
+                full_name LIKE %s OR 
+                email LIKE %s OR 
+                group_name LIKE %s OR
+                teacher_name LIKE %s
+            )'''
+            search_param = f'%{search}%'
+            params.extend([search_param, search_param, search_param, search_param])
+
+        # Add limit and offset
+        query += ' ORDER BY created_at DESC LIMIT %s OFFSET %s'
+        params.extend([limit, offset])
+
+        cursor.execute(query, params)
+        users = cursor.fetchall()
+
+        # Log admin action
+        log_admin_activity(admin_id, "просмотр списка пользователей",
+                           f"Найдено {len(users)} пользователей")
+
+        return jsonify(users)
+
+    except Exception as e:
+        app.logger.error(f'Admin get users error: {str(e)}')
+        return jsonify({'error': str(e)}), 500
+
+    finally:
+        conn.close()
+
+
+# Get a single user
+@app.route('/api/admin/users/<int:user_id>', methods=['GET'])
+@require_admin
+def admin_get_user(admin_id, user_id):
+    conn = get_db()
+    cursor = conn.cursor()
+
+    try:
+        cursor.execute('''
+            SELECT 
+                id, email, full_name, user_type, group_name, teacher_name, 
+                status, created_at, updated_at
+            FROM users
+            WHERE id = %s
+        ''', (user_id,))
+
+        user = cursor.fetchone()
+
+        if not user:
+            return jsonify({'error': 'User not found'}), 404
+
+        # Log admin action
+        log_admin_activity(admin_id, "просмотр пользователя",
+                           f"ID: {user_id}, Email: {user['email']}")
+
+        return jsonify(user)
+
+    except Exception as e:
+        app.logger.error(f'Admin get user error: {str(e)}')
+        return jsonify({'error': str(e)}), 500
+
+    finally:
+        conn.close()
+
+
+# Create a new user
+@app.route('/api/admin/users', methods=['POST'])
+@require_admin
+def admin_create_user(admin_id):
+    data = request.get_json()
+    conn = get_db()
+    cursor = conn.cursor()
+
+    try:
+        # Check required fields
+        required_fields = ['email', 'password', 'fullName', 'userType']
+        for field in required_fields:
+            if not data.get(field):
+                return jsonify({'error': f'Field {field} is required'}), 400
+
+        # Check if email already exists
+        cursor.execute('SELECT id FROM users WHERE email = %s', (data['email'],))
+        if cursor.fetchone():
+            return jsonify({'error': 'Email already exists'}), 400
+
+        # Hash password
+        hashed_password = generate_password_hash(data['password'])
+
+        # Insert user
+        cursor.execute('''
+            INSERT INTO users 
+            (email, password, full_name, user_type, group_name, teacher_name, status)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+        ''', (
+            data['email'],
+            hashed_password,
+            data['fullName'],
+            data['userType'],
+            data.get('group'),
+            data.get('teacher'),
+            data.get('status', 'active')
+        ))
+
+        conn.commit()
+        user_id = cursor.lastrowid
+
+        # Get the created user
+        cursor.execute('''
+            SELECT 
+                id, email, full_name, user_type, group_name, teacher_name, 
+                status, created_at, updated_at
+            FROM users
+            WHERE id = %s
+        ''', (user_id,))
+
+        user = cursor.fetchone()
+
+        # Log admin action
+        log_admin_activity(admin_id, "создание пользователя",
+                           f"ID: {user_id}, Email: {data['email']}, Тип: {data['userType']}")
+
+        return jsonify(user)
+
+    except Exception as e:
+        conn.rollback()
+        app.logger.error(f'Admin create user error: {str(e)}')
+        return jsonify({'error': str(e)}), 500
+
+    finally:
+        conn.close()
+
+
+# Update a user
+@app.route('/api/admin/users/<int:user_id>', methods=['PUT'])
+@require_admin
+def admin_update_user(admin_id, user_id):
+    data = request.get_json()
+    conn = get_db()
+    cursor = conn.cursor()
+
+    try:
+        # Check if user exists
+        cursor.execute('SELECT * FROM users WHERE id = %s', (user_id,))
+        user = cursor.fetchone()
+
+        if not user:
+            return jsonify({'error': 'User not found'}), 404
+
+        # Build update query
+        query = 'UPDATE users SET '
+        params = []
+        update_fields = []
+
+        # Check each field and add to update if provided
+        if 'email' in data:
+            # Check if email already exists for another user
+            cursor.execute('SELECT id FROM users WHERE email = %s AND id != %s',
+                           (data['email'], user_id))
+            if cursor.fetchone():
+                return jsonify({'error': 'Email already used by another user'}), 400
+
+            update_fields.append('email = %s')
+            params.append(data['email'])
+
+        if 'password' in data:
+            update_fields.append('password = %s')
+            params.append(generate_password_hash(data['password']))
+
+        if 'fullName' in data:
+            update_fields.append('full_name = %s')
+            params.append(data['fullName'])
+
+        if 'userType' in data:
+            update_fields.append('user_type = %s')
+            params.append(data['userType'])
+
+        if 'group' in data:
+            update_fields.append('group_name = %s')
+            params.append(data['group'])
+
+        if 'teacher' in data:
+            update_fields.append('teacher_name = %s')
+            params.append(data['teacher'])
+
+        if 'status' in data:
+            update_fields.append('status = %s')
+            params.append(data['status'])
+
+        # If no fields to update
+        if not update_fields:
+            return jsonify({'message': 'No fields to update'}), 200
+
+        # Complete the query
+        query += ', '.join(update_fields) + ' WHERE id = %s'
+        params.append(user_id)
+
+        # Execute update
+        cursor.execute(query, params)
+        conn.commit()
+
+        # Get updated user
+        cursor.execute('''
+            SELECT 
+                id, email, full_name, user_type, group_name, teacher_name, 
+                status, created_at, updated_at
+            FROM users
+            WHERE id = %s
+        ''', (user_id,))
+
+        updated_user = cursor.fetchone()
+
+        # Log admin action
+        field_changes = ', '.join([f"{k}: {v}" for k, v in data.items() if k != 'password'])
+        log_admin_activity(admin_id, "обновление пользователя",
+                           f"ID: {user_id}, Изменения: {field_changes}")
+
+        return jsonify(updated_user)
+
+    except Exception as e:
+        conn.rollback()
+        app.logger.error(f'Admin update user error: {str(e)}')
+        return jsonify({'error': str(e)}), 500
+
+    finally:
+        conn.close()
+
+
+# Delete a user
+@app.route('/api/admin/users/<int:user_id>', methods=['DELETE'])
+@require_admin
+def admin_delete_user(admin_id, user_id):
+    conn = get_db()
+    cursor = conn.cursor()
+
+    try:
+        # Check if user exists and get email for logging
+        cursor.execute('SELECT email, full_name FROM users WHERE id = %s', (user_id,))
+        user = cursor.fetchone()
+
+        if not user:
+            return jsonify({'error': 'User not found'}), 404
+
+        # Don't allow deleting yourself
+        if user_id == admin_id:
+            return jsonify({'error': 'Cannot delete your own account'}), 400
+
+        # Delete user
+        cursor.execute('DELETE FROM users WHERE id = %s', (user_id,))
+        conn.commit()
+
+        # Log admin action
+        log_admin_activity(admin_id, "удаление пользователя",
+                           f"ID: {user_id}, Email: {user['email']}, ФИО: {user['full_name']}")
+
+        return jsonify({'success': True, 'message': 'User deleted successfully'})
+
+    except Exception as e:
+        conn.rollback()
+        app.logger.error(f'Admin delete user error: {str(e)}')
+        return jsonify({'error': str(e)}), 500
+
+    finally:
+        conn.close()
+
+
+# Get all schedules with filtering
+@app.route('/api/admin/schedules', methods=['GET'])
+@require_admin
+def admin_get_schedules(admin_id):
+    # Parse query parameters
+    date = request.args.get('date')
+    date_from = request.args.get('date_from')
+    date_to = request.args.get('date_to')
+    search = request.args.get('search')
+    limit = int(request.args.get('limit', 100))
+    offset = int(request.args.get('offset', 0))
+
+    conn = get_db()
+    cursor = conn.cursor()
+
+    try:
+        # Build the query with optional filters
+        query = '''
+            SELECT 
+                id, semester, week_number, group_name, course, faculty, subject,
+                lesson_type, subgroup, DATE_FORMAT(date, '%Y-%m-%d') as date, 
+                TIME_FORMAT(time_start, '%H:%i') as time_start, 
+                TIME_FORMAT(time_end, '%H:%i') as time_end, 
+                weekday, teacher_name, auditory
+            FROM schedule
+            WHERE 1=1
+        '''
+        params = []
+
+        # Add date filter if provided
+        if date:
+            query += ' AND date = %s'
+            params.append(date)
+
+        # Add date range filter if provided
+        if date_from and date_to:
+            query += ' AND date BETWEEN %s AND %s'
+            params.extend([date_from, date_to])
+
+        # Add search filter if provided
+        if search:
+            query += ''' AND (
+                group_name LIKE %s OR 
+                subject LIKE %s OR 
+                teacher_name LIKE %s OR
+                auditory LIKE %s
+            )'''
+            search_param = f'%{search}%'
+            params.extend([search_param, search_param, search_param, search_param])
+
+        # Add ordering and pagination
+        query += ' ORDER BY date, time_start LIMIT %s OFFSET %s'
+        params.extend([limit, offset])
+
+        cursor.execute(query, params)
+        schedules = cursor.fetchall()
+
+        # Log admin action
+        filter_desc = f"Фильтры: " + ", ".join([
+            f"дата={date}" if date else "",
+            f"с {date_from} по {date_to}" if date_from and date_to else "",
+            f"поиск={search}" if search else ""
+        ]).strip(", ")
+
+        log_admin_activity(admin_id, "просмотр расписания",
+                           f"Найдено {len(schedules)} записей. {filter_desc}")
+
+        return jsonify(schedules)
+
+    except Exception as e:
+        app.logger.error(f'Admin get schedules error: {str(e)}')
+        return jsonify({'error': str(e)}), 500
+
+    finally:
+        conn.close()
+
+
+# Get a single schedule item
+@app.route('/api/admin/schedule/<int:schedule_id>', methods=['GET'])
+@require_admin
+def admin_get_schedule(admin_id, schedule_id):
+    conn = get_db()
+    cursor = conn.cursor()
+
+    try:
+        cursor.execute('''
+            SELECT 
+                id, semester, week_number, group_name, course, faculty, subject,
+                lesson_type, subgroup, DATE_FORMAT(date, '%Y-%m-%d') as date, 
+                TIME_FORMAT(time_start, '%H:%i') as time_start, 
+                TIME_FORMAT(time_end, '%H:%i') as time_end, 
+                weekday, teacher_name, auditory
+            FROM schedule
+            WHERE id = %s
+        ''', (schedule_id,))
+
+        schedule = cursor.fetchone()
+
+        if not schedule:
+            return jsonify({'error': 'Schedule not found'}), 404
+
+        # Log admin action
+        log_admin_activity(admin_id, "просмотр записи расписания",
+                           f"ID: {schedule_id}, Предмет: {schedule['subject']}")
+
+        return jsonify(schedule)
+
+    except Exception as e:
+        app.logger.error(f'Admin get schedule error: {str(e)}')
+        return jsonify({'error': str(e)}), 500
+
+    finally:
+        conn.close()
+
+
+# Create a new schedule item
+@app.route('/api/admin/schedule', methods=['POST'])
+@require_admin
+def admin_create_schedule(admin_id):
+    data = request.get_json()
+    conn = get_db()
+    cursor = conn.cursor()
+
+    try:
+        # Check required fields
+        required_fields = ['date', 'time_start', 'time_end', 'subject',
+                           'lesson_type', 'group_name', 'teacher_name', 'auditory']
+        for field in required_fields:
+            if not data.get(field):
+                return jsonify({'error': f'Field {field} is required'}), 400
+
+        # Insert schedule
+        cursor.execute('''
+            INSERT INTO schedule (
+                date, time_start, time_end, subject, lesson_type, 
+                group_name, teacher_name, auditory, subgroup, 
+                semester, week_number, course, faculty, weekday
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        ''', (
+            data['date'],
+            data['time_start'],
+            data['time_end'],
+            data['subject'],
+            data['lesson_type'],
+            data['group_name'],
+            data['teacher_name'],
+            data['auditory'],
+            data.get('subgroup', 0),
+            data.get('semester'),
+            data.get('week_number'),
+            data.get('course'),
+            data.get('faculty'),
+            data.get('weekday', 1)  # Default to Monday if not provided
+        ))
+
+        conn.commit()
+        schedule_id = cursor.lastrowid
+
+        # Get the created schedule
+        cursor.execute('''
+            SELECT 
+                id, semester, week_number, group_name, course, faculty, subject,
+                lesson_type, subgroup, DATE_FORMAT(date, '%Y-%m-%d') as date, 
+                TIME_FORMAT(time_start, '%H:%i') as time_start, 
+                TIME_FORMAT(time_end, '%H:%i') as time_end, 
+                weekday, teacher_name, auditory
+            FROM schedule
+            WHERE id = %s
+        ''', (schedule_id,))
+
+        schedule = cursor.fetchone()
+
+        # Log admin action
+        log_admin_activity(admin_id, "создание занятия",
+                           f"ID: {schedule_id}, Предмет: {data['subject']}, Группа: {data['group_name']}")
+
+        return jsonify(schedule)
+
+    except Exception as e:
+        conn.rollback()
+        app.logger.error(f'Admin create schedule error: {str(e)}')
+        return jsonify({'error': str(e)}), 500
+
+    finally:
+        conn.close()
+
+
+# Update a schedule item
+@app.route('/api/admin/schedule/<int:schedule_id>', methods=['PUT'])
+@require_admin
+def admin_update_schedule(admin_id, schedule_id):
+    data = request.get_json()
+    conn = get_db()
+    cursor = conn.cursor()
+
+    try:
+        # Check if schedule exists
+        cursor.execute('SELECT * FROM schedule WHERE id = %s', (schedule_id,))
+        schedule = cursor.fetchone()
+
+        if not schedule:
+            return jsonify({'error': 'Schedule not found'}), 404
+
+        # Build update query
+        query = 'UPDATE schedule SET '
+        params = []
+        update_fields = []
+
+        # Check each field and add to update if provided
+        fields = [
+            ('date', 'date'),
+            ('time_start', 'time_start'),
+            ('time_end', 'time_end'),
+            ('subject', 'subject'),
+            ('lesson_type', 'lesson_type'),
+            ('group_name', 'group_name'),
+            ('teacher_name', 'teacher_name'),
+            ('auditory', 'auditory'),
+            ('subgroup', 'subgroup'),
+            ('semester', 'semester'),
+            ('week_number', 'week_number'),
+            ('course', 'course'),
+            ('faculty', 'faculty'),
+            ('weekday', 'weekday')
+        ]
+
+        for api_field, db_field in fields:
+            if api_field in data:
+                update_fields.append(f'{db_field} = %s')
+                params.append(data[api_field])
+
+        # If no fields to update
+        if not update_fields:
+            return jsonify({'message': 'No fields to update'}), 200
+
+        # Complete the query
+        query += ', '.join(update_fields) + ' WHERE id = %s'
+        params.append(schedule_id)
+
+        # Execute update
+        cursor.execute(query, params)
+        conn.commit()
+
+        # Get updated schedule
+        cursor.execute('''
+            SELECT 
+                id, semester, week_number, group_name, course, faculty, subject,
+                lesson_type, subgroup, DATE_FORMAT(date, '%Y-%m-%d') as date, 
+                TIME_FORMAT(time_start, '%H:%i') as time_start, 
+                TIME_FORMAT(time_end, '%H:%i') as time_end, 
+                weekday, teacher_name, auditory
+            FROM schedule
+            WHERE id = %s
+        ''', (schedule_id,))
+
+        updated_schedule = cursor.fetchone()
+
+        # Log admin action
+        field_changes = ', '.join([f"{k}: {v}" for k, v in data.items()])
+        log_admin_activity(admin_id, "обновление занятия",
+                           f"ID: {schedule_id}, Изменения: {field_changes}")
+
+        return jsonify(updated_schedule)
+
+    except Exception as e:
+        conn.rollback()
+        app.logger.error(f'Admin update schedule error: {str(e)}')
+        return jsonify({'error': str(e)}), 500
+
+    finally:
+        conn.close()
+
+
+# Delete a schedule item
+@app.route('/api/admin/schedule/<int:schedule_id>', methods=['DELETE'])
+@require_admin
+def admin_delete_schedule(admin_id, schedule_id):
+    conn = get_db()
+    cursor = conn.cursor()
+
+    try:
+        # Check if schedule exists and get info for logging
+        cursor.execute('SELECT subject, group_name FROM schedule WHERE id = %s', (schedule_id,))
+        schedule = cursor.fetchone()
+
+        if not schedule:
+            return jsonify({'error': 'Schedule not found'}), 404
+
+        # Delete schedule
+        cursor.execute('DELETE FROM schedule WHERE id = %s', (schedule_id,))
+        conn.commit()
+
+        # Log admin action
+        log_admin_activity(admin_id, "удаление занятия",
+                           f"ID: {schedule_id}, Предмет: {schedule['subject']}, Группа: {schedule['group_name']}")
+
+        return jsonify({'success': True, 'message': 'Schedule deleted successfully'})
+
+    except Exception as e:
+        conn.rollback()
+        app.logger.error(f'Admin delete schedule error: {str(e)}')
+        return jsonify({'error': str(e)}), 500
+
+    finally:
+        conn.close()
+
+
+# Get requests (placeholder for now, could be admission requests, support tickets, etc.)
+@app.route('/api/admin/requests', methods=['GET'])
+@require_admin
+def admin_get_requests(admin_id):
+    # This is a placeholder endpoint
+    # In a real application, you would query a table of requests or tickets
+
+    # Log admin action
+    log_admin_activity(admin_id, "просмотр запросов",
+                       "Просмотр списка запросов пользователей")
+
+    # Return empty list for now
+    return jsonify([])
+
+
+# Analytics endpoints
+@app.route('/api/admin/analytics/users', methods=['GET'])
+@require_admin
+def admin_analytics_users(admin_id):
+    conn = get_db()
+    cursor = conn.cursor()
+
+    try:
+        # Get user registration stats by month
+        cursor.execute('''
+            SELECT 
+                DATE_FORMAT(created_at, '%Y-%m') as month,
+                COUNT(*) as count,
+                SUM(CASE WHEN user_type = 'student' THEN 1 ELSE 0 END) as students,
+                SUM(CASE WHEN user_type = 'teacher' THEN 1 ELSE 0 END) as teachers,
+                SUM(CASE WHEN user_type = 'admin' THEN 1 ELSE 0 END) as admins
+            FROM users
+            GROUP BY month
+            ORDER BY month
+        ''')
+
+        monthly_registrations = cursor.fetchall()
+
+        # Get user types distribution
+        cursor.execute('''
+            SELECT 
+                user_type,
+                COUNT(*) as count
+            FROM users
+            GROUP BY user_type
+        ''')
+
+        user_types = cursor.fetchall()
+
+        # Log admin action
+        log_admin_activity(admin_id, "просмотр аналитики пользователей",
+                           "Статистика регистраций и распределение по типам")
+
+        return jsonify({
+            'monthlyRegistrations': monthly_registrations,
+            'userTypes': user_types
+        })
+
+    except Exception as e:
+        app.logger.error(f'Admin analytics users error: {str(e)}')
+        return jsonify({'error': str(e)}), 500
+
+    finally:
+        conn.close()
+
+
+@app.route('/api/admin/analytics/schedule', methods=['GET'])
+@require_admin
+def admin_analytics_schedule(admin_id):
+    conn = get_db()
+    cursor = conn.cursor()
+
+    try:
+        # Get schedule distribution by day of week
+        cursor.execute('''
+            SELECT 
+                weekday,
+                COUNT(*) as count
+            FROM schedule
+            GROUP BY weekday
+            ORDER BY weekday
+        ''')
+
+        weekday_distribution = cursor.fetchall()
+
+        # Get schedule distribution by lesson type
+        cursor.execute('''
+            SELECT 
+                lesson_type,
+                COUNT(*) as count
+            FROM schedule
+            GROUP BY lesson_type
+            ORDER BY count DESC
+        ''')
+
+        lesson_types = cursor.fetchall()
+
+        # Get top teachers by lesson count
+        cursor.execute('''
+            SELECT 
+                teacher_name,
+                COUNT(*) as count
+            FROM schedule
+            GROUP BY teacher_name
+            ORDER BY count DESC
+            LIMIT 10
+        ''')
+
+        top_teachers = cursor.fetchall()
+
+        # Get top subjects by lesson count
+        cursor.execute('''
+            SELECT 
+                subject,
+                COUNT(*) as count
+            FROM schedule
+            GROUP BY subject
+            ORDER BY count DESC
+            LIMIT 10
+        ''')
+
+        top_subjects = cursor.fetchall()
+
+        # Log admin action
+        log_admin_activity(admin_id, "просмотр аналитики расписания",
+                           "Статистика распределения занятий")
+
+        return jsonify({
+            'weekdayDistribution': weekday_distribution,
+            'lessonTypes': lesson_types,
+            'topTeachers': top_teachers,
+            'topSubjects': top_subjects
+        })
+
+    except Exception as e:
+        app.logger.error(f'Admin analytics schedule error: {str(e)}')
+        return jsonify({'error': str(e)}), 500
+
+    finally:
+        conn.close()
+
+
+# Admin settings endpoints
+@app.route('/api/admin/settings', methods=['GET'])
+@require_admin
+def admin_get_settings(admin_id):
+    # Placeholder for system settings
+    # In a real application, you would have a settings table
+
+    # Log admin action
+    log_admin_activity(admin_id, "просмотр настроек системы",
+                       "Просмотр системных настроек")
+
+    # Return placeholder settings
+    return jsonify({
+        'appName': 'University App',
+        'maintenanceMode': False,
+        'allowRegistration': True,
+        'maxFileSize': 5,  # MB
+        'logRetentionDays': 30
+    })
+
+
+@app.route('/api/admin/settings', methods=['PUT'])
+@require_admin
+def admin_update_settings(admin_id):
+    # Placeholder for updating system settings
+    data = request.get_json()
+
+    # Log admin action
+    settings_changes = ', '.join([f"{k}: {v}" for k, v in data.items()])
+    log_admin_activity(admin_id, "обновление настроек системы",
+                       f"Изменения: {settings_changes}")
+
+    # In a real application, you would update a settings table
+    return jsonify({
+        'success': True,
+        'message': 'Settings updated successfully'
+    })
+
+
 # Запуск сервера
 if __name__ == '__main__':
     init_db()

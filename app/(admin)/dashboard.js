@@ -7,7 +7,6 @@ import {
   ScrollView,
   ActivityIndicator,
   RefreshControl,
-  Alert
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -25,8 +24,6 @@ export default function AdminDashboard() {
     totalTeachers: 0,
     totalCourses: 0,
     totalLessons: 0,
-    activeUsers: 0,
-    pendingRequests: 0,
   });
   const [recentActivity, setRecentActivity] = useState([]);
 
@@ -38,26 +35,15 @@ export default function AdminDashboard() {
     try {
       setIsLoading(true);
 
-      // Load dashboard statistics from API
+      // Load dashboard statistics
       const statsResponse = await api.get('/admin/dashboard/stats');
-
       if (statsResponse.data) {
         setStats(statsResponse.data);
-      } else {
-        // Fallback to default values if API fails
-        setStats({
-          totalStudents: 0,
-          totalTeachers: 0,
-          totalCourses: 0,
-          totalLessons: 0,
-          activeUsers: 0,
-          pendingRequests: 0,
-        });
       }
 
-      // Load recent activity from API
+      // Load recent activity
       const activityResponse = await api.get('/admin/activity-log', {
-        params: { limit: 10, offset: 0 }
+        params: { limit: 5, offset: 0 }
       });
 
       if (activityResponse.data && activityResponse.data.logs) {
@@ -66,20 +52,6 @@ export default function AdminDashboard() {
 
     } catch (error) {
       console.error('Error loading dashboard data:', error);
-      Alert.alert(
-        'Ошибка загрузки',
-        'Не удалось загрузить данные дашборда. Проверьте подключение к интернету.'
-      );
-
-      // Set default values on error
-      setStats({
-        totalStudents: 0,
-        totalTeachers: 0,
-        totalCourses: 0,
-        totalLessons: 0,
-        activeUsers: 0,
-        pendingRequests: 0,
-      });
     } finally {
       setIsLoading(false);
       setRefreshing(false);
@@ -94,37 +66,28 @@ export default function AdminDashboard() {
   // Format timestamp for display
   const formatTimestamp = (timestamp) => {
     if (!timestamp) return '';
-
     const date = new Date(timestamp);
     const now = new Date();
     const diffMs = now - date;
     const diffMins = Math.floor(diffMs / 60000);
-    const diffHours = Math.floor(diffMs / 3600000);
-    const diffDays = Math.floor(diffMs / 86400000);
 
     if (diffMins < 60) {
-      return `${diffMins} минут назад`;
-    } else if (diffHours < 24) {
-      return `${diffHours} часов назад`;
-    } else if (diffDays < 7) {
-      return `${diffDays} дней назад`;
+      return `${diffMins} мин. назад`;
+    } else if (diffMins < 1440) {
+      return `${Math.floor(diffMins / 60)} ч. назад`;
     } else {
-      return date.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' });
+      return date.toLocaleDateString('ru-RU');
     }
   };
 
-  const getUserCount = () => {
-    return stats.totalStudents + stats.totalTeachers;
-  };
-
+  // Navigation items
   const navigationItems = [
     {
       title: 'Пользователи',
       icon: 'people',
       route: '/(admin)/users',
       color: '#5F66F2',
-      count: getUserCount(),
-      description: 'Управление студентами и преподавателями'
+      count: stats.totalStudents + stats.totalTeachers,
     },
     {
       title: 'Расписание',
@@ -132,61 +95,13 @@ export default function AdminDashboard() {
       route: '/(admin)/schedule',
       color: '#007AFF',
       count: stats.totalLessons,
-      description: 'Управление занятиями и аудиториями'
-    },
-    {
-      title: 'Контент',
-      icon: 'newspaper',
-      route: '/(admin)/content',
-      color: '#FF9500',
-      count: null,
-      description: 'Новости, события и уведомления'
-    },
-    {
-      title: 'Аналитика',
-      icon: 'analytics',
-      route: '/(admin)/analytics',
-      color: '#34C759',
-      count: null,
-      description: 'Статистика и отчеты'
-    },
-    {
-      title: 'Запросы',
-      icon: 'mail-unread',
-      route: '/(admin)/requests',
-      color: '#FF3B30',
-      count: stats.pendingRequests,
-      description: 'Заявки и обращения пользователей'
-    },
-    {
-      title: 'Настройки',
-      icon: 'settings',
-      route: '/(admin)/settings',
-      color: '#8E8E93',
-      count: null,
-      description: 'Параметры системы'
     },
   ];
-
-  const renderStatCard = (title, value, icon, color) => (
-    <View style={[styles.statCard, { borderLeftColor: color }]}>
-      <View style={styles.statIconContainer}>
-        <View style={[styles.statIconBackground, { backgroundColor: `${color}20` }]}>
-          <Ionicons name={icon} size={24} color={color} />
-        </View>
-      </View>
-      <View style={styles.statContent}>
-        <Text style={styles.statValue}>{value}</Text>
-        <Text style={styles.statTitle}>{title}</Text>
-      </View>
-    </View>
-  );
 
   if (isLoading) {
     return (
       <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color="#007AFF" />
-        <Text style={styles.loadingText}>Загрузка данных...</Text>
       </View>
     );
   }
@@ -195,8 +110,8 @@ export default function AdminDashboard() {
     <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.header}>
         <View>
-          <Text style={styles.headerTitle}>Панель управления</Text>
-          <Text style={styles.headerSubtitle}>Добро пожаловать, {user?.fullName}</Text>
+          <Text style={styles.headerTitle}>Админ-панель</Text>
+          <Text style={styles.headerSubtitle}>Привет, {user?.fullName}</Text>
         </View>
         <TouchableOpacity
           style={styles.profileButton}
@@ -218,15 +133,37 @@ export default function AdminDashboard() {
           />
         }
       >
-        <View style={styles.statsContainer}>
-          {renderStatCard('Студенты', stats.totalStudents, 'school', '#5F66F2')}
-          {renderStatCard('Преподаватели', stats.totalTeachers, 'people', '#FF9500')}
-          {renderStatCard('Предметы', stats.totalCourses, 'book', '#34C759')}
-          {renderStatCard('Активные пользователи', stats.activeUsers, 'pulse', '#007AFF')}
+        {/* Stats Cards */}
+        <View style={styles.statsRow}>
+          <View style={[styles.statCard, { borderLeftColor: '#5F66F2' }]}>
+            <Ionicons name="school" size={24} color="#5F66F2" style={styles.statIcon} />
+            <Text style={styles.statValue}>{stats.totalStudents}</Text>
+            <Text style={styles.statTitle}>Студенты</Text>
+          </View>
+
+          <View style={[styles.statCard, { borderLeftColor: '#FF9500' }]}>
+            <Ionicons name="people" size={24} color="#FF9500" style={styles.statIcon} />
+            <Text style={styles.statValue}>{stats.totalTeachers}</Text>
+            <Text style={styles.statTitle}>Преподаватели</Text>
+          </View>
         </View>
 
-        <Text style={styles.sectionTitle}>Управление системой</Text>
+        <View style={styles.statsRow}>
+          <View style={[styles.statCard, { borderLeftColor: '#34C759' }]}>
+            <Ionicons name="book" size={24} color="#34C759" style={styles.statIcon} />
+            <Text style={styles.statValue}>{stats.totalCourses}</Text>
+            <Text style={styles.statTitle}>Предметы</Text>
+          </View>
 
+          <View style={[styles.statCard, { borderLeftColor: '#007AFF' }]}>
+            <Ionicons name="calendar" size={24} color="#007AFF" style={styles.statIcon} />
+            <Text style={styles.statValue}>{stats.totalLessons}</Text>
+            <Text style={styles.statTitle}>Занятия</Text>
+          </View>
+        </View>
+
+        {/* Navigation Grid */}
+        <Text style={styles.sectionTitle}>Управление</Text>
         <View style={styles.navGrid}>
           {navigationItems.map((item, index) => (
             <TouchableOpacity
@@ -236,7 +173,7 @@ export default function AdminDashboard() {
             >
               <View style={[styles.navIconContainer, { backgroundColor: `${item.color}20` }]}>
                 <Ionicons name={item.icon} size={24} color={item.color} />
-                {item.count !== null && (
+                {item.count > 0 && (
                   <View style={[styles.navBadge, { backgroundColor: item.color }]}>
                     <Text style={styles.navBadgeText}>
                       {item.count > 99 ? '99+' : item.count}
@@ -245,61 +182,34 @@ export default function AdminDashboard() {
                 )}
               </View>
               <Text style={styles.navTitle}>{item.title}</Text>
-              <Text style={styles.navDescription}>{item.description}</Text>
             </TouchableOpacity>
           ))}
         </View>
 
-        <View style={styles.activitySection}>
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Последние действия</Text>
-            <TouchableOpacity onPress={() => router.push('/(admin)/activity')}>
-              <Text style={styles.seeAllText}>Смотреть все</Text>
-            </TouchableOpacity>
-          </View>
+        {/* Recent Activity */}
+        {recentActivity.length > 0 && (
+          <View style={styles.activitySection}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>Последние действия</Text>
+              <TouchableOpacity onPress={() => router.push('/(admin)/activity')}>
+                <Text style={styles.seeAllText}>Все</Text>
+              </TouchableOpacity>
+            </View>
 
-          <View style={styles.activityList}>
-            {recentActivity.length > 0 ? (
-              recentActivity.map((activity, index) => (
+            <View style={styles.activityList}>
+              {recentActivity.map((activity, index) => (
                 <View key={index} style={styles.activityItem}>
-                  <View style={[styles.activityIcon, {
-                    backgroundColor: activity.action.includes('создание') ? '#34C75920' :
-                                     activity.action.includes('удаление') ? '#FF3B3020' :
-                                     activity.action.includes('обновление') ? '#FF950020' :
-                                     '#5F66F220'
-                  }]}>
-                    <Ionicons
-                      name={
-                        activity.action.includes('пользователя') ? 'person' :
-                        activity.action.includes('расписания') ? 'calendar' :
-                        activity.action.includes('настройки') ? 'settings' :
-                        'document-text'
-                      }
-                      size={20}
-                      color={
-                        activity.action.includes('создание') ? '#34C759' :
-                        activity.action.includes('удаление') ? '#FF3B30' :
-                        activity.action.includes('обновление') ? '#FF9500' :
-                        '#5F66F2'
-                      }
-                    />
-                  </View>
                   <View style={styles.activityContent}>
                     <Text style={styles.activityText}>
                       <Text style={styles.highlightText}>{activity.admin_name}</Text> {activity.action}
-                      {activity.details && <Text> - {activity.details}</Text>}
                     </Text>
                     <Text style={styles.activityTime}>{formatTimestamp(activity.created_at)}</Text>
                   </View>
                 </View>
-              ))
-            ) : (
-              <View style={styles.emptyActivity}>
-                <Text style={styles.emptyActivityText}>Нет последних действий</Text>
-              </View>
-            )}
+              ))}
+            </View>
           </View>
-        </View>
+        )}
       </ScrollView>
     </SafeAreaView>
   );
@@ -314,11 +224,6 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-  },
-  loadingText: {
-    marginTop: 12,
-    fontSize: 16,
-    color: '#8E8E93',
   },
   header: {
     flexDirection: 'row',
@@ -349,10 +254,10 @@ const styles = StyleSheet.create({
   scrollContent: {
     paddingBottom: 30,
   },
-  statsContainer: {
+  statsRow: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    padding: 16,
+    paddingHorizontal: 16,
+    marginTop: 16,
     justifyContent: 'space-between',
   },
   statCard: {
@@ -361,30 +266,19 @@ const styles = StyleSheet.create({
     padding: 16,
     width: '48%',
     marginBottom: 16,
-    flexDirection: 'row',
-    alignItems: 'center',
     borderLeftWidth: 4,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
     elevation: 3,
-  },
-  statIconContainer: {
-    marginRight: 12,
-  },
-  statIconBackground: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    justifyContent: 'center',
     alignItems: 'center',
   },
-  statContent: {
-    flex: 1,
+  statIcon: {
+    marginBottom: 10,
   },
   statValue: {
-    fontSize: 20,
+    fontSize: 24,
     fontWeight: '700',
     color: '#151940',
   },
@@ -418,14 +312,16 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 4,
     elevation: 2,
+    alignItems: 'center',
   },
   navIconContainer: {
-    width: 48,
-    height: 48,
-    borderRadius: 12,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 12,
+    position: 'relative',
   },
   navBadge: {
     position: 'absolute',
@@ -447,12 +343,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: '#151940',
-    marginBottom: 6,
-  },
-  navDescription: {
-    fontSize: 12,
-    color: '#8E8E93',
-    lineHeight: 16,
   },
   activitySection: {
     marginTop: 10,
@@ -479,18 +369,9 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   activityItem: {
-    flexDirection: 'row',
     padding: 16,
     borderBottomWidth: 1,
     borderBottomColor: '#F2F2F7',
-  },
-  activityIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 12,
   },
   activityContent: {
     flex: 1,
@@ -509,12 +390,4 @@ const styles = StyleSheet.create({
     color: '#8E8E93',
     marginTop: 4,
   },
-  emptyActivity: {
-    padding: 20,
-    alignItems: 'center',
-  },
-  emptyActivityText: {
-    fontSize: 14,
-    color: '#8E8E93',
-  }
 });
