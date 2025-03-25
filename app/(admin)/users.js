@@ -1,5 +1,4 @@
-// app/(admin)/users.js
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -10,143 +9,333 @@ import {
   Modal,
   ActivityIndicator,
   Alert,
-  RefreshControl
+  RefreshControl,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
+import { useAuth } from '../../context/auth';
 import api from '../../utils/api';
 
 export default function UsersManagement() {
   const router = useRouter();
+  const { user } = useAuth();
   const [users, setUsers] = useState([]);
   const [filteredUsers, setFilteredUsers] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [filter, setFilter] = useState('all'); // 'all', 'student', 'teacher', 'admin'
-  const [modalVisible, setModalVisible] = useState(false);
+  const [userModalVisible, setUserModalVisible] = useState(false);
+  const [createModalVisible, setCreateModalVisible] = useState(false);
+  const [confirmDeleteVisible, setConfirmDeleteVisible] = useState(false);
   const [selectedUser, setSelectedUser] = useState(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [availableGroups, setAvailableGroups] = useState([]);
+  const [groupSuggestions, setGroupSuggestions] = useState([]);
+  const [showGroupSuggestions, setShowGroupSuggestions] = useState(false);
 
-  // Демо-данные для пользователей
-  const demoUsers = [
-    { id: 1, fullName: 'Иванов Иван Иванович', email: 'ivanov@example.com', userType: 'student', group: '2211-0101.1', status: 'active', lastActive: '2025-03-24T10:15:00' },
-    { id: 2, fullName: 'Петров Петр Петрович', email: 'petrov@example.com', userType: 'student', group: '2211-0101.1', status: 'active', lastActive: '2025-03-24T09:30:00' },
-    { id: 3, fullName: 'Сидорова Анна Владимировна', email: 'sidorova@example.com', userType: 'teacher', teacherName: 'Сидорова А.В.', status: 'active', lastActive: '2025-03-24T11:45:00' },
-    { id: 4, fullName: 'Козлов Дмитрий Сергеевич', email: 'kozlov@example.com', userType: 'teacher', teacherName: 'Козлов Д.С.', status: 'inactive', lastActive: '2025-03-20T14:20:00' },
-    { id: 5, fullName: 'Новикова Елена Александровна', email: 'novikova@example.com', userType: 'admin', status: 'active', lastActive: '2025-03-24T08:15:00' },
-    { id: 6, fullName: 'Морозов Александр Игоревич', email: 'morozov@example.com', userType: 'student', group: '2211-0102.1', status: 'blocked', lastActive: '2025-03-15T16:40:00' },
-    { id: 7, fullName: 'Соколова Мария Николаевна', email: 'sokolova@example.com', userType: 'student', group: '2212-0101.1', status: 'active', lastActive: '2025-03-23T12:10:00' },
-    { id: 8, fullName: 'Кузнецов Владимир Андреевич', email: 'kuznetsov@example.com', userType: 'teacher', teacherName: 'Кузнецов В.А.', status: 'active', lastActive: '2025-03-22T10:05:00' },
-  ];
+  // New user form
+  const [newUser, setNewUser] = useState({
+    email: '',
+    password: '',
+    fullName: '',
+    userType: 'student',
+    group: '',
+    teacher: '',
+    status: 'active'
+  });
 
-  useEffect(() => {
-    loadUsers();
-  }, []);
+  // Form validation errors
+  const [errors, setErrors] = useState({});
 
-  useEffect(() => {
-    filterUsers();
-  }, [searchQuery, filter, users]);
-
-  const loadUsers = async () => {
+  // Load users from API
+  const loadUsers = useCallback(async () => {
     try {
       setIsLoading(true);
-      // В реальном приложении здесь будет API запрос
-      // const response = await api.get('/admin/users');
-      // setUsers(response.data);
 
-      // Используем демо-данные
-      setTimeout(() => {
-        setUsers(demoUsers);
-        setIsLoading(false);
-        setRefreshing(false);
-      }, 1000);
+      // Build query parameters
+      const params = new URLSearchParams();
+      if (filter !== 'all') {
+        params.append('type', filter);
+      }
+      if (searchQuery) {
+        params.append('search', searchQuery);
+      }
+
+      const response = await api.get(`/admin/users?${params.toString()}`);
+
+      if (response.data) {
+        setUsers(response.data);
+        setFilteredUsers(response.data);
+      }
     } catch (error) {
       console.error('Error loading users:', error);
+      Alert.alert(
+        'Ошибка загрузки',
+        'Не удалось загрузить список пользователей. Проверьте подключение к сети.'
+      );
+    } finally {
       setIsLoading(false);
       setRefreshing(false);
-      Alert.alert('Ошибка', 'Не удалось загрузить список пользователей');
+    }
+  }, [filter, searchQuery]);
+
+  // Load groups for suggestions
+  const loadGroups = async () => {
+    try {
+      const response = await api.get('/groups');
+      if (response.data) {
+        setAvailableGroups(response.data);
+      }
+    } catch (error) {
+      console.error('Error loading groups:', error);
     }
   };
 
+  // Initial data load
+  useEffect(() => {
+    loadUsers();
+    loadGroups();
+  }, [loadUsers]);
+
+  // Handle refresh
   const onRefresh = () => {
     setRefreshing(true);
     loadUsers();
   };
 
-  const filterUsers = () => {
-    let filtered = [...users];
-
-    // Фильтрация по типу пользователя
-    if (filter !== 'all') {
-      filtered = filtered.filter(user => user.userType === filter);
-    }
-
-    // Поиск по имени или email
-    if (searchQuery) {
-      filtered = filtered.filter(user =>
-        user.fullName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        user.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        (user.group && user.group.toLowerCase().includes(searchQuery.toLowerCase())) ||
-        (user.teacherName && user.teacherName.toLowerCase().includes(searchQuery.toLowerCase()))
-      );
-    }
-
-    setFilteredUsers(filtered);
-  };
-
+  // Handle user selection
   const handleUserSelect = (user) => {
     setSelectedUser(user);
-    setModalVisible(true);
+    setUserModalVisible(true);
   };
 
-  const handleStatusChange = (newStatus) => {
-    // В реальном приложении здесь будет API запрос
-    // api.patch(`/admin/users/${selectedUser.id}`, { status: newStatus })
+  // Filter groups based on input
+  const filterGroups = (text) => {
+    if (!text) {
+      setGroupSuggestions([]);
+      setShowGroupSuggestions(false);
+      return;
+    }
 
-    // Обновляем локальный список
-    const updatedUsers = users.map(u =>
-      u.id === selectedUser.id ? { ...u, status: newStatus } : u
-    );
+    const filtered = availableGroups.filter(group =>
+      group.toLowerCase().includes(text.toLowerCase())
+    ).slice(0, 5);
 
-    setUsers(updatedUsers);
-    setModalVisible(false);
-
-    Alert.alert(
-      'Статус изменен',
-      `Пользователь ${selectedUser.fullName} теперь ${newStatus === 'active' ? 'активен' : newStatus === 'blocked' ? 'заблокирован' : 'неактивен'}`
-    );
+    setGroupSuggestions(filtered);
+    setShowGroupSuggestions(filtered.length > 0);
   };
 
-  const handleRoleChange = (newRole) => {
-    // В реальном приложении здесь будет API запрос
-    // api.patch(`/admin/users/${selectedUser.id}`, { userType: newRole })
-
-    // Обновляем локальный список
-    const updatedUsers = users.map(u =>
-      u.id === selectedUser.id ? { ...u, userType: newRole } : u
-    );
-
-    setUsers(updatedUsers);
-    setModalVisible(false);
-
-    Alert.alert(
-      'Роль изменена',
-      `Пользователь ${selectedUser.fullName} теперь ${newRole === 'admin' ? 'администратор' : newRole === 'teacher' ? 'преподаватель' : 'студент'}`
-    );
+  // Reset form errors for a field
+  const clearError = (field) => {
+    setErrors(prev => ({...prev, [field]: null}));
   };
 
-  const handleResetPassword = () => {
-    // В реальном приложении здесь будет API запрос
-    // api.post(`/admin/users/${selectedUser.id}/reset-password`)
+  // Handle status change
+  const handleStatusChange = async (newStatus) => {
+    if (isSubmitting || !selectedUser) return;
 
-    Alert.alert(
-      'Пароль сброшен',
-      `Новый пароль был отправлен на email пользователя: ${selectedUser.email}`
-    );
+    try {
+      setIsSubmitting(true);
+
+      await api.put(`/admin/users/${selectedUser.id}`, {
+        status: newStatus
+      });
+
+      // Update local state
+      const updatedUsers = users.map(u =>
+        u.id === selectedUser.id ? {...u, status: newStatus} : u
+      );
+
+      setUsers(updatedUsers);
+      setUserModalVisible(false);
+
+      Alert.alert(
+        'Статус изменен',
+        `Пользователь ${selectedUser.full_name} теперь ${
+          newStatus === 'active' ? 'активен' : 
+          newStatus === 'blocked' ? 'заблокирован' : 'неактивен'
+        }`
+      );
+    } catch (error) {
+      console.error('Error updating user status:', error);
+      Alert.alert(
+        'Ошибка',
+        'Не удалось изменить статус пользователя'
+      );
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
+  // Handle role change
+  const handleRoleChange = async (newRole) => {
+    if (isSubmitting || !selectedUser) return;
+
+    try {
+      setIsSubmitting(true);
+
+      await api.put(`/admin/users/${selectedUser.id}`, {
+        userType: newRole
+      });
+
+      // Update local state
+      const updatedUsers = users.map(u =>
+        u.id === selectedUser.id ? {...u, user_type: newRole} : u
+      );
+
+      setUsers(updatedUsers);
+      setUserModalVisible(false);
+
+      Alert.alert(
+        'Роль изменена',
+        `Пользователь ${selectedUser.full_name} теперь ${
+          newRole === 'admin' ? 'администратор' : 
+          newRole === 'teacher' ? 'преподаватель' : 'студент'
+        }`
+      );
+    } catch (error) {
+      console.error('Error updating user role:', error);
+      Alert.alert(
+        'Ошибка',
+        'Не удалось изменить роль пользователя'
+      );
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // Reset password
+  const handleResetPassword = async () => {
+    if (isSubmitting || !selectedUser) return;
+
+    try {
+      setIsSubmitting(true);
+
+      // Generate random password
+      const randomPassword = Math.random().toString(36).substring(2, 10);
+
+      await api.put(`/admin/users/${selectedUser.id}`, {
+        password: randomPassword
+      });
+
+      Alert.alert(
+        'Пароль сброшен',
+        `Новый пароль для ${selectedUser.email}: ${randomPassword}\n\nПожалуйста, сообщите пользователю новый пароль.`
+      );
+    } catch (error) {
+      console.error('Error resetting password:', error);
+      Alert.alert(
+        'Ошибка',
+        'Не удалось сбросить пароль пользователя'
+      );
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // Create new user
+  const handleCreateUser = async () => {
+    if (isSubmitting) return;
+
+    // Validate form
+    const validationErrors = {};
+    if (!newUser.email) validationErrors.email = 'Email обязателен';
+    if (!newUser.password) validationErrors.password = 'Пароль обязателен';
+    if (!newUser.fullName) validationErrors.fullName = 'ФИО обязательно';
+    if (newUser.userType === 'student' && !newUser.group) {
+      validationErrors.group = 'Укажите группу для студента';
+    }
+    if (newUser.userType === 'teacher' && !newUser.teacher) {
+      validationErrors.teacher = 'Укажите имя преподавателя';
+    }
+
+    if (Object.keys(validationErrors).length > 0) {
+      setErrors(validationErrors);
+      return;
+    }
+
+    try {
+      setIsSubmitting(true);
+
+      const response = await api.post('/admin/users', newUser);
+
+      if (response.data) {
+        // Add new user to the list
+        setUsers(prev => [response.data, ...prev]);
+
+        // Close modal and reset form
+        setCreateModalVisible(false);
+        setNewUser({
+          email: '',
+          password: '',
+          fullName: '',
+          userType: 'student',
+          group: '',
+          teacher: '',
+          status: 'active'
+        });
+
+        Alert.alert(
+          'Пользователь создан',
+          `Пользователь ${response.data.full_name} успешно создан`
+        );
+      }
+    } catch (error) {
+      console.error('Error creating user:', error);
+
+      if (error.response?.data?.error === 'Email already exists') {
+        setErrors(prev => ({...prev, email: 'Email уже используется'}));
+      } else {
+        Alert.alert(
+          'Ошибка',
+          'Не удалось создать пользователя'
+        );
+      }
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // Delete user
+  const handleDeleteUser = async () => {
+    if (isSubmitting || !selectedUser) return;
+
+    try {
+      setIsSubmitting(true);
+
+      await api.delete(`/admin/users/${selectedUser.id}`);
+
+      // Remove user from list
+      setUsers(prev => prev.filter(u => u.id !== selectedUser.id));
+
+      // Close modals
+      setConfirmDeleteVisible(false);
+      setUserModalVisible(false);
+
+      Alert.alert(
+        'Пользователь удален',
+        `Пользователь ${selectedUser.full_name} успешно удален`
+      );
+    } catch (error) {
+      console.error('Error deleting user:', error);
+      Alert.alert(
+        'Ошибка',
+        'Не удалось удалить пользователя'
+      );
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // Format date
   const formatDate = (dateString) => {
+    if (!dateString) return '';
+
     const date = new Date(dateString);
     return date.toLocaleString('ru-RU', {
       day: '2-digit',
@@ -157,6 +346,7 @@ export default function UsersManagement() {
     });
   };
 
+  // Get status color
   const getStatusColor = (status) => {
     switch (status) {
       case 'active': return '#34C759';
@@ -166,6 +356,7 @@ export default function UsersManagement() {
     }
   };
 
+  // Get user type text
   const getUserTypeText = (userType) => {
     switch (userType) {
       case 'student': return 'Студент';
@@ -175,6 +366,7 @@ export default function UsersManagement() {
     }
   };
 
+  // Get user type icon
   const getUserTypeIcon = (userType) => {
     switch (userType) {
       case 'student': return 'school';
@@ -184,6 +376,7 @@ export default function UsersManagement() {
     }
   };
 
+  // Render user item
   const renderUserItem = ({ item }) => (
     <TouchableOpacity
       style={styles.userCard}
@@ -192,23 +385,29 @@ export default function UsersManagement() {
       <View style={styles.userInfo}>
         <View style={[
           styles.userTypeIconContainer,
-          { backgroundColor: item.userType === 'admin' ? '#5F66F230' : item.userType === 'teacher' ? '#FF950030' : '#34C75930' }
+          { backgroundColor: item.user_type === 'admin' ? '#5F66F230' : item.user_type === 'teacher' ? '#FF950030' : '#34C75930' }
         ]}>
           <Ionicons
-            name={getUserTypeIcon(item.userType)}
+            name={getUserTypeIcon(item.user_type)}
             size={22}
-            color={item.userType === 'admin' ? '#5F66F2' : item.userType === 'teacher' ? '#FF9500' : '#34C759'}
+            color={item.user_type === 'admin' ? '#5F66F2' : item.user_type === 'teacher' ? '#FF9500' : '#34C759'}
           />
         </View>
         <View style={styles.userDetails}>
-          <Text style={styles.userName}>{item.fullName}</Text>
+          <Text style={styles.userName}>{item.full_name}</Text>
           <Text style={styles.userEmail}>{item.email}</Text>
           <View style={styles.userMetaInfo}>
-            <Text style={styles.userType}>{getUserTypeText(item.userType)}</Text>
-            {item.group && (
+            <Text style={styles.userType}>{getUserTypeText(item.user_type)}</Text>
+            {item.group_name && (
               <>
                 <Text style={styles.metaSeparator}>•</Text>
-                <Text style={styles.userGroup}>{item.group}</Text>
+                <Text style={styles.userGroup}>{item.group_name}</Text>
+              </>
+            )}
+            {item.teacher_name && (
+              <>
+                <Text style={styles.metaSeparator}>•</Text>
+                <Text style={styles.userGroup}>{item.teacher_name}</Text>
               </>
             )}
           </View>
@@ -217,21 +416,22 @@ export default function UsersManagement() {
       <View style={styles.userStatus}>
         <View style={[styles.statusIndicator, { backgroundColor: getStatusColor(item.status) }]} />
         <Text style={styles.lastActive}>
-          {formatDate(item.lastActive)}
+          {formatDate(item.created_at)}
         </Text>
       </View>
     </TouchableOpacity>
   );
 
-  const UserModal = () => {
+  // User detail modal
+  const UserDetailModal = () => {
     if (!selectedUser) return null;
 
     return (
       <Modal
         animationType="slide"
         transparent={true}
-        visible={modalVisible}
-        onRequestClose={() => setModalVisible(false)}
+        visible={userModalVisible}
+        onRequestClose={() => setUserModalVisible(false)}
       >
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
@@ -239,7 +439,7 @@ export default function UsersManagement() {
               <Text style={styles.modalTitle}>Управление пользователем</Text>
               <TouchableOpacity
                 style={styles.closeButton}
-                onPress={() => setModalVisible(false)}
+                onPress={() => setUserModalVisible(false)}
               >
                 <Ionicons name="close" size={24} color="#8E8E93" />
               </TouchableOpacity>
@@ -248,23 +448,23 @@ export default function UsersManagement() {
             <View style={styles.userProfile}>
               <View style={[
                 styles.userAvatarContainer,
-                { backgroundColor: selectedUser.userType === 'admin' ? '#5F66F230' : selectedUser.userType === 'teacher' ? '#FF950030' : '#34C75930' }
+                { backgroundColor: selectedUser.user_type === 'admin' ? '#5F66F230' : selectedUser.user_type === 'teacher' ? '#FF950030' : '#34C75930' }
               ]}>
                 <Text style={[
                   styles.userAvatarText,
-                  { color: selectedUser.userType === 'admin' ? '#5F66F2' : selectedUser.userType === 'teacher' ? '#FF9500' : '#34C759' }
+                  { color: selectedUser.user_type === 'admin' ? '#5F66F2' : selectedUser.user_type === 'teacher' ? '#FF9500' : '#34C759' }
                 ]}>
-                  {selectedUser.fullName.split(' ').map(name => name[0]).join('').toUpperCase()}
+                  {selectedUser.full_name.split(' ').map(name => name[0]).join('').toUpperCase()}
                 </Text>
               </View>
 
-              <Text style={styles.profileName}>{selectedUser.fullName}</Text>
+              <Text style={styles.profileName}>{selectedUser.full_name}</Text>
               <Text style={styles.profileEmail}>{selectedUser.email}</Text>
 
               <View style={styles.profileInfoRow}>
                 <View style={styles.profileInfoItem}>
                   <Text style={styles.profileInfoLabel}>Тип</Text>
-                  <Text style={styles.profileInfoValue}>{getUserTypeText(selectedUser.userType)}</Text>
+                  <Text style={styles.profileInfoValue}>{getUserTypeText(selectedUser.user_type)}</Text>
                 </View>
 
                 <View style={styles.profileInfoItem}>
@@ -279,28 +479,28 @@ export default function UsersManagement() {
                 </View>
               </View>
 
-              {selectedUser.userType === 'student' && (
+              {selectedUser.user_type === 'student' && (
                 <View style={styles.profileInfoRow}>
                   <View style={styles.profileInfoItem}>
                     <Text style={styles.profileInfoLabel}>Группа</Text>
-                    <Text style={styles.profileInfoValue}>{selectedUser.group || 'Не указана'}</Text>
+                    <Text style={styles.profileInfoValue}>{selectedUser.group_name || 'Не указана'}</Text>
                   </View>
                 </View>
               )}
 
-              {selectedUser.userType === 'teacher' && (
+              {selectedUser.user_type === 'teacher' && (
                 <View style={styles.profileInfoRow}>
                   <View style={styles.profileInfoItem}>
                     <Text style={styles.profileInfoLabel}>Преподаватель</Text>
-                    <Text style={styles.profileInfoValue}>{selectedUser.teacherName || 'Не указан'}</Text>
+                    <Text style={styles.profileInfoValue}>{selectedUser.teacher_name || 'Не указан'}</Text>
                   </View>
                 </View>
               )}
 
               <View style={styles.profileInfoRow}>
                 <View style={styles.profileInfoItem}>
-                  <Text style={styles.profileInfoLabel}>Последняя активность</Text>
-                  <Text style={styles.profileInfoValue}>{formatDate(selectedUser.lastActive)}</Text>
+                  <Text style={styles.profileInfoLabel}>Создан</Text>
+                  <Text style={styles.profileInfoValue}>{formatDate(selectedUser.created_at)}</Text>
                 </View>
               </View>
             </View>
@@ -314,6 +514,7 @@ export default function UsersManagement() {
                   selectedUser.status === 'active' ? styles.blockButton : styles.activateButton
                 ]}
                 onPress={() => handleStatusChange(selectedUser.status === 'active' ? 'blocked' : 'active')}
+                disabled={isSubmitting}
               >
                 <Ionicons
                   name={selectedUser.status === 'active' ? 'ban' : 'checkmark-circle'}
@@ -328,6 +529,7 @@ export default function UsersManagement() {
               <TouchableOpacity
                 style={styles.actionButton}
                 onPress={handleResetPassword}
+                disabled={isSubmitting}
               >
                 <Ionicons name="key" size={20} color="#FFFFFF" />
                 <Text style={styles.actionButtonText}>Сбросить пароль</Text>
@@ -340,18 +542,19 @@ export default function UsersManagement() {
               <TouchableOpacity
                 style={[
                   styles.roleButton,
-                  selectedUser.userType === 'student' && styles.activeRoleButton
+                  selectedUser.user_type === 'student' && styles.activeRoleButton
                 ]}
                 onPress={() => handleRoleChange('student')}
+                disabled={isSubmitting}
               >
                 <Ionicons
                   name="school"
                   size={20}
-                  color={selectedUser.userType === 'student' ? '#FFFFFF' : '#34C759'}
+                  color={selectedUser.user_type === 'student' ? '#FFFFFF' : '#34C759'}
                 />
                 <Text style={[
                   styles.roleButtonText,
-                  selectedUser.userType === 'student' && styles.activeRoleButtonText
+                  selectedUser.user_type === 'student' && styles.activeRoleButtonText
                 ]}>
                   Студент
                 </Text>
@@ -360,18 +563,19 @@ export default function UsersManagement() {
               <TouchableOpacity
                 style={[
                   styles.roleButton,
-                  selectedUser.userType === 'teacher' && styles.activeRoleButton
+                  selectedUser.user_type === 'teacher' && styles.activeRoleButton
                 ]}
                 onPress={() => handleRoleChange('teacher')}
+                disabled={isSubmitting}
               >
                 <Ionicons
                   name="people"
                   size={20}
-                  color={selectedUser.userType === 'teacher' ? '#FFFFFF' : '#FF9500'}
+                  color={selectedUser.user_type === 'teacher' ? '#FFFFFF' : '#FF9500'}
                 />
                 <Text style={[
                   styles.roleButtonText,
-                  selectedUser.userType === 'teacher' && styles.activeRoleButtonText
+                  selectedUser.user_type === 'teacher' && styles.activeRoleButtonText
                 ]}>
                   Преподаватель
                 </Text>
@@ -380,28 +584,338 @@ export default function UsersManagement() {
               <TouchableOpacity
                 style={[
                   styles.roleButton,
-                  selectedUser.userType === 'admin' && styles.activeRoleButton
+                  selectedUser.user_type === 'admin' && styles.activeRoleButton
                 ]}
                 onPress={() => handleRoleChange('admin')}
+                disabled={isSubmitting}
               >
                 <Ionicons
                   name="shield"
                   size={20}
-                  color={selectedUser.userType === 'admin' ? '#FFFFFF' : '#5F66F2'}
+                  color={selectedUser.user_type === 'admin' ? '#FFFFFF' : '#5F66F2'}
                 />
                 <Text style={[
                   styles.roleButtonText,
-                  selectedUser.userType === 'admin' && styles.activeRoleButtonText
+                  selectedUser.user_type === 'admin' && styles.activeRoleButtonText
                 ]}>
                   Администратор
                 </Text>
               </TouchableOpacity>
             </View>
+
+            <TouchableOpacity
+              style={styles.deleteButton}
+              onPress={() => setConfirmDeleteVisible(true)}
+              disabled={isSubmitting}
+            >
+              <Ionicons name="trash" size={20} color="#FFFFFF" />
+              <Text style={styles.deleteButtonText}>Удалить пользователя</Text>
+            </TouchableOpacity>
+
+            {isSubmitting && (
+              <View style={styles.loadingOverlay}>
+                <ActivityIndicator size="large" color="#007AFF" />
+              </View>
+            )}
           </View>
         </View>
       </Modal>
     );
   };
+
+  // Create user modal
+  const CreateUserModal = () => (
+    <Modal
+      animationType="slide"
+      transparent={true}
+      visible={createModalVisible}
+      onRequestClose={() => setCreateModalVisible(false)}
+    >
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={styles.modalOverlay}
+      >
+        <View style={[styles.modalContent, {maxHeight: '85%'}]}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>Создание пользователя</Text>
+            <TouchableOpacity
+              style={styles.closeButton}
+              onPress={() => setCreateModalVisible(false)}
+            >
+              <Ionicons name="close" size={24} color="#8E8E93" />
+            </TouchableOpacity>
+          </View>
+
+          <ScrollView style={styles.formScrollView}>
+            <View style={styles.formGroup}>
+              <Text style={styles.formLabel}>Email <Text style={styles.requiredStar}>*</Text></Text>
+              <TextInput
+                style={[styles.formInput, errors.email && styles.inputError]}
+                placeholder="например: student@example.com"
+                value={newUser.email}
+                onChangeText={(text) => {
+                  setNewUser(prev => ({...prev, email: text}));
+                  clearError('email');
+                }}
+                keyboardType="email-address"
+                autoCapitalize="none"
+              />
+              {errors.email && <Text style={styles.errorText}>{errors.email}</Text>}
+            </View>
+
+            <View style={styles.formGroup}>
+              <Text style={styles.formLabel}>Пароль <Text style={styles.requiredStar}>*</Text></Text>
+              <TextInput
+                style={[styles.formInput, errors.password && styles.inputError]}
+                placeholder="Минимум 6 символов"
+                value={newUser.password}
+                onChangeText={(text) => {
+                  setNewUser(prev => ({...prev, password: text}));
+                  clearError('password');
+                }}
+                secureTextEntry
+              />
+              {errors.password && <Text style={styles.errorText}>{errors.password}</Text>}
+            </View>
+
+            <View style={styles.formGroup}>
+              <Text style={styles.formLabel}>ФИО <Text style={styles.requiredStar}>*</Text></Text>
+              <TextInput
+                style={[styles.formInput, errors.fullName && styles.inputError]}
+                placeholder="Иванов Иван Иванович"
+                value={newUser.fullName}
+                onChangeText={(text) => {
+                  setNewUser(prev => ({...prev, fullName: text}));
+                  clearError('fullName');
+                }}
+              />
+              {errors.fullName && <Text style={styles.errorText}>{errors.fullName}</Text>}
+            </View>
+
+            <View style={styles.formGroup}>
+              <Text style={styles.formLabel}>Тип пользователя <Text style={styles.requiredStar}>*</Text></Text>
+              <View style={styles.userTypeContainer}>
+                <TouchableOpacity
+                  style={[
+                    styles.userTypeButton,
+                    newUser.userType === 'student' && styles.userTypeButtonActive,
+                  ]}
+                  onPress={() => setNewUser(prev => ({...prev, userType: 'student'}))}
+                >
+                  <Ionicons
+                    name="school"
+                    size={20}
+                    color={newUser.userType === 'student' ? '#007AFF' : '#8E8E93'}
+                  />
+                  <Text style={[
+                    styles.userTypeText,
+                    newUser.userType === 'student' && styles.userTypeTextActive,
+                  ]}>
+                    Студент
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[
+                    styles.userTypeButton,
+                    newUser.userType === 'teacher' && styles.userTypeButtonActive,
+                  ]}
+                  onPress={() => setNewUser(prev => ({...prev, userType: 'teacher'}))}
+                >
+                  <Ionicons
+                    name="people"
+                    size={20}
+                    color={newUser.userType === 'teacher' ? '#007AFF' : '#8E8E93'}
+                  />
+                  <Text style={[
+                    styles.userTypeText,
+                    newUser.userType === 'teacher' && styles.userTypeTextActive,
+                  ]}>
+                    Преподаватель
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[
+                    styles.userTypeButton,
+                    newUser.userType === 'admin' && styles.userTypeButtonActive,
+                  ]}
+                  onPress={() => setNewUser(prev => ({...prev, userType: 'admin'}))}
+                >
+                  <Ionicons
+                    name="shield"
+                    size={20}
+                    color={newUser.userType === 'admin' ? '#007AFF' : '#8E8E93'}
+                  />
+                  <Text style={[
+                    styles.userTypeText,
+                    newUser.userType === 'admin' && styles.userTypeTextActive,
+                  ]}>
+                    Админ
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            {newUser.userType === 'student' && (
+              <View style={styles.formGroup}>
+                <Text style={styles.formLabel}>Группа <Text style={styles.requiredStar}>*</Text></Text>
+                <View style={styles.suggestionsContainer}>
+                  <TextInput
+                    style={[styles.formInput, errors.group && styles.inputError]}
+                    placeholder="Например: 2211-0101.1"
+                    value={newUser.group}
+                    onChangeText={(text) => {
+                      setNewUser(prev => ({...prev, group: text}));
+                      filterGroups(text);
+                      clearError('group');
+                    }}
+                    onFocus={() => filterGroups(newUser.group)}
+                    onBlur={() => setTimeout(() => setShowGroupSuggestions(false), 200)}
+                  />
+                  {showGroupSuggestions && (
+                    <View style={styles.suggestions}>
+                      {groupSuggestions.map((group, index) => (
+                        <TouchableOpacity
+                          key={index}
+                          style={styles.suggestionItem}
+                          onPress={() => {
+                            setNewUser(prev => ({...prev, group}));
+                            setShowGroupSuggestions(false);
+                          }}
+                        >
+                          <Text style={styles.suggestionText}>{group}</Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  )}
+                </View>
+                {errors.group && <Text style={styles.errorText}>{errors.group}</Text>}
+              </View>
+            )}
+
+            {newUser.userType === 'teacher' && (
+              <View style={styles.formGroup}>
+                <Text style={styles.formLabel}>Имя преподавателя <Text style={styles.requiredStar}>*</Text></Text>
+                <TextInput
+                  style={[styles.formInput, errors.teacher && styles.inputError]}
+                  placeholder="Фамилия И.О."
+                  value={newUser.teacher}
+                  onChangeText={(text) => {
+                    setNewUser(prev => ({...prev, teacher: text}));
+                    clearError('teacher');
+                  }}
+                />
+                {errors.teacher && <Text style={styles.errorText}>{errors.teacher}</Text>}
+              </View>
+            )}
+
+            <View style={styles.formGroup}>
+              <Text style={styles.formLabel}>Статус</Text>
+              <View style={styles.statusButtons}>
+                <TouchableOpacity
+                  style={[
+                    styles.statusButton,
+                    newUser.status === 'active' && styles.statusButtonActive,
+                  ]}
+                  onPress={() => setNewUser(prev => ({...prev, status: 'active'}))}
+                >
+                  <Text style={[
+                    styles.statusButtonText,
+                    newUser.status === 'active' && styles.statusButtonTextActive,
+                  ]}>
+                    Активен
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[
+                    styles.statusButton,
+                    newUser.status === 'inactive' && styles.statusButtonActive,
+                  ]}
+                  onPress={() => setNewUser(prev => ({...prev, status: 'inactive'}))}
+                >
+                  <Text style={[
+                    styles.statusButtonText,
+                    newUser.status === 'inactive' && styles.statusButtonTextActive,
+                  ]}>
+                    Неактивен
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[
+                    styles.statusButton,
+                    newUser.status === 'blocked' && styles.statusButtonActive,
+                  ]}
+                  onPress={() => setNewUser(prev => ({...prev, status: 'blocked'}))}
+                >
+                  <Text style={[
+                    styles.statusButtonText,
+                    newUser.status === 'blocked' && styles.statusButtonTextActive,
+                  ]}>
+                    Заблокирован
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            <TouchableOpacity
+              style={[styles.submitButton, isSubmitting && styles.disabledButton]}
+              onPress={handleCreateUser}
+              disabled={isSubmitting}
+            >
+              {isSubmitting ? (
+                <ActivityIndicator size="small" color="#FFFFFF" />
+              ) : (
+                <Text style={styles.submitButtonText}>Создать пользователя</Text>
+              )}
+            </TouchableOpacity>
+          </ScrollView>
+        </View>
+      </KeyboardAvoidingView>
+    </Modal>
+  );
+
+  // Delete confirmation modal
+  const DeleteConfirmationModal = () => (
+    <Modal
+      animationType="fade"
+      transparent={true}
+      visible={confirmDeleteVisible}
+      onRequestClose={() => setConfirmDeleteVisible(false)}
+    >
+      <View style={styles.confirmOverlay}>
+        <View style={styles.confirmBox}>
+          <Text style={styles.confirmTitle}>Удаление пользователя</Text>
+          <Text style={styles.confirmText}>
+            Вы уверены, что хотите удалить пользователя {selectedUser?.full_name}?
+            Это действие нельзя отменить.
+          </Text>
+          <View style={styles.confirmButtons}>
+            <TouchableOpacity
+              style={[styles.confirmButton, styles.cancelButton]}
+              onPress={() => setConfirmDeleteVisible(false)}
+              disabled={isSubmitting}
+            >
+              <Text style={styles.cancelButtonText}>Отмена</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.confirmButton, styles.deleteConfirmButton]}
+              onPress={handleDeleteUser}
+              disabled={isSubmitting}
+            >
+              {isSubmitting ? (
+                <ActivityIndicator size="small" color="#FFFFFF" />
+              ) : (
+                <Text style={styles.deleteConfirmText}>Удалить</Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -413,7 +927,10 @@ export default function UsersManagement() {
           <Ionicons name="chevron-back" size={24} color="#007AFF" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Управление пользователями</Text>
-        <TouchableOpacity style={styles.headerActionButton}>
+        <TouchableOpacity
+          style={styles.headerActionButton}
+          onPress={() => setCreateModalVisible(true)}
+        >
           <Ionicons name="add" size={24} color="#007AFF" />
         </TouchableOpacity>
       </View>
@@ -489,14 +1006,17 @@ export default function UsersManagement() {
               <Ionicons name="people" size={48} color="#8E8E93" />
               <Text style={styles.emptyText}>Пользователи не найдены</Text>
               <Text style={styles.emptySubtext}>
-                Попробуйте изменить параметры поиска
+                Попробуйте изменить параметры поиска или создать нового пользователя
               </Text>
             </View>
           }
         />
       )}
 
-      <UserModal />
+      {/* Modals */}
+      <UserDetailModal />
+      <CreateUserModal />
+      <DeleteConfirmationModal />
     </SafeAreaView>
   );
 }
@@ -800,6 +1320,7 @@ const styles = StyleSheet.create({
   roleButtons: {
     flexDirection: 'row',
     justifyContent: 'space-between',
+    marginBottom: 24,
   },
   roleButton: {
     flexDirection: 'row',
@@ -821,6 +1342,212 @@ const styles = StyleSheet.create({
     marginLeft: 6,
   },
   activeRoleButtonText: {
+    color: '#FFFFFF',
+    fontWeight: '500',
+  },
+  deleteButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FF3B30',
+    borderRadius: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+  },
+  deleteButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#FFFFFF',
+    marginLeft: 6,
+  },
+  loadingOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(255, 255, 255, 0.7)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderRadius: 12,
+  },
+  formScrollView: {
+    maxHeight: '70%',
+  },
+  formGroup: {
+    marginBottom: 20,
+  },
+  formLabel: {
+    fontSize: 15,
+    color: '#151940',
+    fontWeight: '500',
+    marginBottom: 8,
+  },
+  requiredStar: {
+    color: '#FF3B30',
+  },
+  formInput: {
+    backgroundColor: '#F5F5F5',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 16,
+    color: '#151940',
+  },
+  inputError: {
+    borderWidth: 1,
+    borderColor: '#FF3B30',
+  },
+  errorText: {
+    color: '#FF3B30',
+    fontSize: 12,
+    marginTop: 4,
+  },
+  userTypeContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  userTypeButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#F5F5F5',
+    borderRadius: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    flex: 1,
+    marginHorizontal: 4,
+  },
+  userTypeButtonActive: {
+    backgroundColor: '#E5F1FF',
+    borderWidth: 1,
+    borderColor: '#007AFF',
+  },
+  userTypeText: {
+    fontSize: 14,
+    color: '#151940',
+    marginLeft: 6,
+  },
+  userTypeTextActive: {
+    color: '#007AFF',
+    fontWeight: '500',
+  },
+  statusButtons: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  statusButton: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#F5F5F5',
+    borderRadius: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    marginHorizontal: 4,
+  },
+  statusButtonActive: {
+    backgroundColor: '#E5F1FF',
+    borderWidth: 1,
+    borderColor: '#007AFF',
+  },
+  statusButtonText: {
+    fontSize: 14,
+    color: '#151940',
+  },
+  statusButtonTextActive: {
+    color: '#007AFF',
+    fontWeight: '500',
+  },
+  submitButton: {
+    backgroundColor: '#007AFF',
+    borderRadius: 10,
+    paddingVertical: 12,
+    alignItems: 'center',
+    marginTop: 10,
+  },
+  disabledButton: {
+    opacity: 0.7,
+  },
+  submitButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#FFFFFF',
+  },
+  suggestionsContainer: {
+    position: 'relative',
+    zIndex: 100,
+  },
+  suggestions: {
+    position: 'absolute',
+    top: '100%',
+    left: 0,
+    right: 0,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E5E5EA',
+    borderRadius: 8,
+    maxHeight: 150,
+    zIndex: 10,
+  },
+  suggestionItem: {
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F2F2F7',
+  },
+  suggestionText: {
+    fontSize: 14,
+    color: '#151940',
+  },
+  confirmOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+  },
+  confirmBox: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    width: '100%',
+    padding: 20,
+  },
+  confirmTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#151940',
+    marginBottom: 12,
+  },
+  confirmText: {
+    fontSize: 15,
+    color: '#3C3C43',
+    marginBottom: 20,
+    lineHeight: 20,
+  },
+  confirmButtons: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+  },
+  confirmButton: {
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    marginLeft: 8,
+  },
+  cancelButton: {
+    backgroundColor: '#F2F2F7',
+  },
+  cancelButtonText: {
+    fontSize: 14,
+    color: '#3C3C43',
+    fontWeight: '500',
+  },
+  deleteConfirmButton: {
+    backgroundColor: '#FF3B30',
+  },
+  deleteConfirmText: {
+    fontSize: 14,
     color: '#FFFFFF',
     fontWeight: '500',
   },

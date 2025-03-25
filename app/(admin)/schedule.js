@@ -1,5 +1,4 @@
-// app/(admin)/schedule.js - Упрощенная версия
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -12,15 +11,21 @@ import {
   ScrollView,
   Alert,
   RefreshControl,
+  Platform,
+  KeyboardAvoidingView
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import api from '../../utils/api';
+import dayjs from 'dayjs';
+import 'dayjs/locale/ru';
 
-// Компонент кастомного выбора даты
+dayjs.locale('ru');
+
+// Component for custom date picker
 const CustomDatePicker = ({ value, onChange }) => {
-  // Списки для выбора
+  // Generate lists for selection
   const years = Array.from({ length: 10 }, (_, i) => new Date().getFullYear() + i - 5);
   const months = [
     { value: 0, label: 'Январь' },
@@ -37,7 +42,7 @@ const CustomDatePicker = ({ value, onChange }) => {
     { value: 11, label: 'Декабрь' }
   ];
 
-  // Получение числа дней в месяце
+  // Get days in month
   const getDaysInMonth = (year, month) => {
     return new Date(year, month + 1, 0).getDate();
   };
@@ -55,13 +60,13 @@ const CustomDatePicker = ({ value, onChange }) => {
     const newDate = { ...selectedDate, [field]: newValue };
     setSelectedDate(newDate);
 
-    // Проверка валидности дня для нового месяца/года
+    // Check day validity for new month/year
     const maxDays = getDaysInMonth(newDate.year, newDate.month);
     if (newDate.day > maxDays) {
       newDate.day = maxDays;
     }
 
-    // Создание объекта Date и вызов callback
+    // Create Date object and call callback
     const dateObj = new Date(newDate.year, newDate.month, newDate.day);
     onChange(dateObj);
   };
@@ -168,238 +173,365 @@ export default function ScheduleManagement() {
   const [modalVisible, setModalVisible] = useState(false);
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [selectedSchedule, setSelectedSchedule] = useState(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [confirmDeleteVisible, setConfirmDeleteVisible] = useState(false);
+  const [teachers, setTeachers] = useState([]);
+  const [groups, setGroups] = useState([]);
+  const [showGroupSuggestions, setShowGroupSuggestions] = useState(false);
+  const [showTeacherSuggestions, setShowTeacherSuggestions] = useState(false);
+  const [filteredGroups, setFilteredGroups] = useState([]);
+  const [filteredTeachers, setFilteredTeachers] = useState([]);
 
-  // Поля для нового расписания
+  // Form data for new/edit schedule
   const [formData, setFormData] = useState({
     date: new Date(),
-    groupName: '',
+    group_name: '',
     subject: '',
-    lessonType: '',
-    timeStart: '08:30',
-    timeEnd: '10:00',
-    teacherName: '',
+    lesson_type: '',
+    time_start: '08:30',
+    time_end: '10:00',
+    teacher_name: '',
     auditory: '',
     subgroup: 0,
+    semester: '',
+    week_number: '',
+    course: '',
+    faculty: ''
   });
 
-  // Демо-данные для расписания
-  const demoSchedules = [
-    { id: 1, date: '2025-03-25', group_name: '2211-0101.1', subject: 'Математический анализ', lesson_type: 'Лекция', time_start: '08:30', time_end: '10:00', teacher_name: 'Петров П.П.', auditory: '301', subgroup: 0 },
-    { id: 2, date: '2025-03-25', group_name: '2211-0101.1', subject: 'Программирование', lesson_type: 'Практика', time_start: '10:15', time_end: '11:45', teacher_name: 'Сидорова А.В.', auditory: '215', subgroup: 1 },
-    { id: 3, date: '2025-03-25', group_name: '2211-0102.1', subject: 'Физика', lesson_type: 'Лабораторная', time_start: '12:00', time_end: '13:30', teacher_name: 'Иванов И.И.', auditory: '105', subgroup: 0 },
-    { id: 4, date: '2025-03-26', group_name: '2211-0101.1', subject: 'История', lesson_type: 'Семинар', time_start: '08:30', time_end: '10:00', teacher_name: 'Козлов Д.С.', auditory: '401', subgroup: 0 },
-    { id: 5, date: '2025-03-26', group_name: '2212-0101.1', subject: 'Английский язык', lesson_type: 'Практика', time_start: '10:15', time_end: '11:45', teacher_name: 'Смирнова Н.В.', auditory: '318', subgroup: 0 },
-    { id: 6, date: '2025-03-27', group_name: '2211-0102.1', subject: 'Информатика', lesson_type: 'Лекция', time_start: '12:00', time_end: '13:30', teacher_name: 'Сидорова А.В.', auditory: '112', subgroup: 0 },
-  ];
+  // Form validation errors
+  const [errors, setErrors] = useState({});
 
-  useEffect(() => {
-    loadSchedules();
-  }, []);
+  // Reset form errors for a field
+  const clearError = (field) => {
+    setErrors(prev => ({...prev, [field]: null}));
+  };
 
-  useEffect(() => {
-    filterSchedules();
-  }, [searchQuery, filter, schedules]);
+  // Filter groups based on input
+  const filterGroups = (text) => {
+    if (!text) {
+      setFilteredGroups([]);
+      setShowGroupSuggestions(false);
+      return;
+    }
 
-  const loadSchedules = async () => {
+    const filtered = groups.filter(group =>
+      group.toLowerCase().includes(text.toLowerCase())
+    ).slice(0, 5);
+
+    setFilteredGroups(filtered);
+    setShowGroupSuggestions(filtered.length > 0);
+  };
+
+  // Filter teachers based on input
+  const filterTeachers = (text) => {
+    if (!text) {
+      setFilteredTeachers([]);
+      setShowTeacherSuggestions(false);
+      return;
+    }
+
+    const filtered = teachers.filter(teacher =>
+      teacher.toLowerCase().includes(text.toLowerCase())
+    ).slice(0, 5);
+
+    setFilteredTeachers(filtered);
+    setShowTeacherSuggestions(filtered.length > 0);
+  };
+
+  // Load schedules from API
+  const loadSchedules = useCallback(async () => {
     try {
       setIsLoading(true);
-      // В реальном приложении здесь будет API запрос
-      // const response = await api.get('/admin/schedules');
-      // setSchedules(response.data);
 
-      // Используем демо-данные
-      setTimeout(() => {
-        setSchedules(demoSchedules);
-        setIsLoading(false);
-        setRefreshing(false);
-      }, 1000);
+      // Prepare query parameters based on filter
+      const params = new URLSearchParams();
+
+      // Get current date
+      const today = dayjs();
+
+      if (filter === 'today') {
+        params.append('date', today.format('YYYY-MM-DD'));
+      }
+      else if (filter === 'week') {
+        // Week filter
+        const startOfWeek = today.startOf('week').format('YYYY-MM-DD');
+        const endOfWeek = today.endOf('week').format('YYYY-MM-DD');
+        params.append('date_from', startOfWeek);
+        params.append('date_to', endOfWeek);
+      }
+      else if (filter === 'month') {
+        // Month filter
+        const startOfMonth = today.startOf('month').format('YYYY-MM-DD');
+        const endOfMonth = today.endOf('month').format('YYYY-MM-DD');
+        params.append('date_from', startOfMonth);
+        params.append('date_to', endOfMonth);
+      }
+
+      // Add search parameter if provided
+      if (searchQuery) {
+        params.append('search', searchQuery);
+      }
+
+      // Fetch schedules
+      const response = await api.get(`/admin/schedules?${params.toString()}`);
+
+      if (response.data) {
+        setSchedules(response.data);
+        // Also update filtered schedules
+        setFilteredSchedules(response.data);
+      }
     } catch (error) {
       console.error('Error loading schedules:', error);
+      Alert.alert(
+        'Ошибка загрузки',
+        'Не удалось загрузить данные расписания. Проверьте подключение к сети.'
+      );
+    } finally {
       setIsLoading(false);
       setRefreshing(false);
-      Alert.alert('Ошибка', 'Не удалось загрузить расписание');
+    }
+  }, [filter, searchQuery]);
+
+  // Load groups and teachers for form autocomplete
+  const loadFormData = async () => {
+    try {
+      // Load groups
+      const groupsResponse = await api.get('/groups');
+      if (groupsResponse.data) {
+        setGroups(groupsResponse.data);
+      }
+
+      // Load teachers
+      const teachersResponse = await api.get('/teachers');
+      if (teachersResponse.data) {
+        setTeachers(teachersResponse.data);
+      }
+    } catch (error) {
+      console.error('Error loading form reference data:', error);
     }
   };
 
+  // Initial data loading
+  useEffect(() => {
+    loadSchedules();
+    loadFormData();
+  }, [loadSchedules]);
+
+  // Filter schedules when searchQuery changes
+  useEffect(() => {
+    if (schedules.length === 0) return;
+
+    let filtered = [...schedules];
+
+    // Filter by text if search query is provided
+    if (searchQuery) {
+      const query = searchQuery.toLowerCase();
+      filtered = filtered.filter(item =>
+        (item.group_name && item.group_name.toLowerCase().includes(query)) ||
+        (item.subject && item.subject.toLowerCase().includes(query)) ||
+        (item.teacher_name && item.teacher_name.toLowerCase().includes(query)) ||
+        (item.auditory && item.auditory.toLowerCase().includes(query))
+      );
+    }
+
+    setFilteredSchedules(filtered);
+  }, [searchQuery, schedules]);
+
+  // Handle refresh
   const onRefresh = () => {
     setRefreshing(true);
     loadSchedules();
   };
 
-  const filterSchedules = () => {
-    let filtered = [...schedules];
-
-    // Фильтрация по периоду
-    if (filter !== 'all') {
-      const today = new Date();
-      const todayStr = today.toISOString().split('T')[0];
-
-      switch (filter) {
-        case 'today':
-          filtered = filtered.filter(item => item.date === todayStr);
-          break;
-        case 'week':
-          const weekStart = new Date(today);
-          weekStart.setDate(today.getDate() - today.getDay());
-          const weekEnd = new Date(weekStart);
-          weekEnd.setDate(weekStart.getDate() + 6);
-          filtered = filtered.filter(item => {
-            const itemDate = new Date(item.date);
-            return itemDate >= weekStart && itemDate <= weekEnd;
-          });
-          break;
-        case 'month':
-          const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
-          const monthEnd = new Date(today.getFullYear(), today.getMonth() + 1, 0);
-          filtered = filtered.filter(item => {
-            const itemDate = new Date(item.date);
-            return itemDate >= monthStart && itemDate <= monthEnd;
-          });
-          break;
-      }
-    }
-
-    // Поиск по тексту
-    if (searchQuery) {
-      filtered = filtered.filter(item =>
-        item.group_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        item.subject.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        item.teacher_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        item.auditory.toLowerCase().includes(searchQuery.toLowerCase())
-      );
-    }
-
-    setFilteredSchedules(filtered);
-  };
-
+  // Create new schedule
   const handleCreateSchedule = () => {
+    // Reset form data
     setSelectedSchedule(null);
     setFormData({
       date: new Date(),
-      groupName: '',
+      group_name: '',
       subject: '',
-      lessonType: '',
-      timeStart: '08:30',
-      timeEnd: '10:00',
-      teacherName: '',
+      lesson_type: '',
+      time_start: '08:30',
+      time_end: '10:00',
+      teacher_name: '',
       auditory: '',
       subgroup: 0,
+      semester: '',
+      week_number: '',
+      course: '',
+      faculty: ''
     });
+    setErrors({});
     setModalVisible(true);
   };
 
+  // Edit schedule
   const handleEditSchedule = (schedule) => {
     setSelectedSchedule(schedule);
+
+    // Convert date string to Date object
+    const scheduleDate = schedule.date ? new Date(schedule.date) : new Date();
+
     setFormData({
-      date: new Date(schedule.date),
-      groupName: schedule.group_name,
-      subject: schedule.subject,
-      lessonType: schedule.lesson_type,
-      timeStart: schedule.time_start,
-      timeEnd: schedule.time_end,
-      teacherName: schedule.teacher_name,
-      auditory: schedule.auditory,
-      subgroup: schedule.subgroup,
+      date: scheduleDate,
+      group_name: schedule.group_name || '',
+      subject: schedule.subject || '',
+      lesson_type: schedule.lesson_type || '',
+      time_start: schedule.time_start || '08:30',
+      time_end: schedule.time_end || '10:00',
+      teacher_name: schedule.teacher_name || '',
+      auditory: schedule.auditory || '',
+      subgroup: schedule.subgroup || 0,
+      semester: schedule.semester || '',
+      week_number: schedule.week_number || '',
+      course: schedule.course || '',
+      faculty: schedule.faculty || ''
     });
+
+    setErrors({});
     setModalVisible(true);
   };
 
+  // Delete schedule confirmation
   const handleDeleteSchedule = (id) => {
-    Alert.alert(
-      'Подтверждение',
-      'Вы уверены, что хотите удалить это расписание?',
-      [
-        { text: 'Отмена', style: 'cancel' },
-        {
-          text: 'Удалить',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              // В реальном приложении здесь будет API запрос
-              // await api.delete(`/admin/schedules/${id}`);
-
-              // Обновляем локальный список
-              const updatedSchedules = schedules.filter(item => item.id !== id);
-              setSchedules(updatedSchedules);
-
-              Alert.alert('Успешно', 'Расписание удалено');
-            } catch (error) {
-              console.error('Error deleting schedule:', error);
-              Alert.alert('Ошибка', 'Не удалось удалить расписание');
-            }
-          }
-        }
-      ]
-    );
+    const schedule = schedules.find(s => s.id === id);
+    if (schedule) {
+      setSelectedSchedule(schedule);
+      setConfirmDeleteVisible(true);
+    }
   };
 
+  // Confirm delete schedule
+  const confirmDeleteSchedule = async () => {
+    if (!selectedSchedule || isSubmitting) return;
+
+    try {
+      setIsSubmitting(true);
+
+      await api.delete(`/admin/schedule/${selectedSchedule.id}`);
+
+      // Update state
+      setSchedules(prev => prev.filter(s => s.id !== selectedSchedule.id));
+      setFilteredSchedules(prev => prev.filter(s => s.id !== selectedSchedule.id));
+
+      // Close modals
+      setConfirmDeleteVisible(false);
+
+      Alert.alert(
+        'Успешно',
+        'Занятие удалено из расписания'
+      );
+    } catch (error) {
+      console.error('Error deleting schedule:', error);
+      Alert.alert(
+        'Ошибка',
+        'Не удалось удалить занятие. Попробуйте позже.'
+      );
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // Handle save schedule (create/update)
   const handleSaveSchedule = async () => {
-    // Валидация формы
-    if (!formData.groupName || !formData.subject || !formData.lessonType ||
-        !formData.timeStart || !formData.timeEnd || !formData.teacherName || !formData.auditory) {
-      Alert.alert('Ошибка', 'Заполните все обязательные поля');
+    // Validate form
+    const validationErrors = {};
+
+    // Required fields
+    if (!formData.group_name) validationErrors.group_name = 'Укажите группу';
+    if (!formData.subject) validationErrors.subject = 'Укажите предмет';
+    if (!formData.lesson_type) validationErrors.lesson_type = 'Выберите тип занятия';
+    if (!formData.time_start) validationErrors.time_start = 'Укажите время начала';
+    if (!formData.time_end) validationErrors.time_end = 'Укажите время окончания';
+    if (!formData.teacher_name) validationErrors.teacher_name = 'Укажите преподавателя';
+    if (!formData.auditory) validationErrors.auditory = 'Укажите аудиторию';
+
+    // Show errors if any
+    if (Object.keys(validationErrors).length > 0) {
+      setErrors(validationErrors);
       return;
     }
 
     try {
+      setIsSubmitting(true);
+
+      // Prepare data for API
       const scheduleData = {
-        date: formData.date.toISOString().split('T')[0],
-        group_name: formData.groupName,
+        // Format date as YYYY-MM-DD
+        date: dayjs(formData.date).format('YYYY-MM-DD'),
+        group_name: formData.group_name,
         subject: formData.subject,
-        lesson_type: formData.lessonType,
-        time_start: formData.timeStart,
-        time_end: formData.timeEnd,
-        teacher_name: formData.teacherName,
+        lesson_type: formData.lesson_type,
+        time_start: formData.time_start,
+        time_end: formData.time_end,
+        teacher_name: formData.teacher_name,
         auditory: formData.auditory,
         subgroup: parseInt(formData.subgroup) || 0,
+        semester: formData.semester || null,
+        week_number: formData.week_number || null,
+        course: formData.course || null,
+        faculty: formData.faculty || null,
+        // Calculate weekday from date (1-7, where 1 is Monday)
+        weekday: dayjs(formData.date).day() || 7 // Adjust for dayjs 0-6 (Sunday-Saturday)
       };
 
+      let response;
+
       if (selectedSchedule) {
-        // Редактирование существующего расписания
-        // В реальном приложении здесь будет API запрос
-        // await api.put(`/admin/schedules/${selectedSchedule.id}`, scheduleData);
+        // Update existing schedule
+        response = await api.put(`/admin/schedule/${selectedSchedule.id}`, scheduleData);
 
-        // Обновляем локальный список
-        const updatedSchedules = schedules.map(item =>
-          item.id === selectedSchedule.id ? { ...scheduleData, id: item.id } : item
-        );
-        setSchedules(updatedSchedules);
+        // Update state
+        setSchedules(prev => prev.map(s =>
+          s.id === selectedSchedule.id ? { ...s, ...scheduleData, id: s.id } : s
+        ));
 
-        Alert.alert('Успешно', 'Расписание обновлено');
+        Alert.alert('Успешно', 'Занятие обновлено');
       } else {
-        // Создание нового расписания
-        // В реальном приложении здесь будет API запрос
-        // const response = await api.post('/admin/schedules', scheduleData);
+        // Create new schedule
+        response = await api.post('/admin/schedule', scheduleData);
 
-        // Обновляем локальный список
-        const newSchedule = {
-          ...scheduleData,
-          id: Math.max(...schedules.map(s => s.id), 0) + 1
-        };
-        setSchedules([...schedules, newSchedule]);
+        // Update state with new schedule
+        if (response.data && response.data.id) {
+          setSchedules(prev => [...prev, { ...scheduleData, id: response.data.id }]);
+        }
 
-        Alert.alert('Успешно', 'Расписание создано');
+        Alert.alert('Успешно', 'Занятие добавлено в расписание');
       }
 
+      // Close modal
       setModalVisible(false);
+
+      // Refresh schedules list
+      loadSchedules();
     } catch (error) {
       console.error('Error saving schedule:', error);
-      Alert.alert('Ошибка', 'Не удалось сохранить расписание');
+      Alert.alert(
+        'Ошибка',
+        'Не удалось сохранить занятие. Проверьте введенные данные.'
+      );
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
+  // Date change handler
   const handleDateChange = (selectedDate) => {
-    setFormData({ ...formData, date: selectedDate });
+    setFormData(prev => ({ ...prev, date: selectedDate }));
     setShowDatePicker(false);
   };
 
+  // Format date for display
   const formatDateForDisplay = (dateString) => {
-    const date = new Date(dateString);
-    return date.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    const date = dayjs(dateString);
+    return date.format('DD.MM.YYYY');
   };
 
+  // Get lesson type color
   const getLessonTypeColor = (type) => {
-    switch (type.toLowerCase()) {
+    switch (type?.toLowerCase()) {
       case 'лекция': return '#3E7BFA';
       case 'практика': return '#34C759';
       case 'лабораторная': return '#FF9500';
@@ -408,6 +540,7 @@ export default function ScheduleManagement() {
     }
   };
 
+  // Render schedule item
   const renderScheduleItem = ({ item }) => (
     <View style={styles.scheduleCard}>
       <View style={styles.scheduleHeader}>
@@ -459,14 +592,21 @@ export default function ScheduleManagement() {
     </View>
   );
 
+  // Schedule Form Modal
   const ScheduleFormModal = () => (
     <Modal
       animationType="slide"
       transparent={true}
       visible={modalVisible}
-      onRequestClose={() => setModalVisible(false)}
+      onRequestClose={() => {
+        setShowDatePicker(false);
+        setModalVisible(false);
+      }}
     >
-      <View style={styles.modalOverlay}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={styles.modalOverlay}
+      >
         <View style={styles.modalContent}>
           <View style={styles.modalHeader}>
             <Text style={styles.modalTitle}>
@@ -485,13 +625,13 @@ export default function ScheduleManagement() {
 
           <ScrollView showsVerticalScrollIndicator={false}>
             <View style={styles.formGroup}>
-              <Text style={styles.formLabel}>Дата</Text>
+              <Text style={styles.formLabel}>Дата <Text style={styles.requiredText}>*</Text></Text>
               <TouchableOpacity
-                style={styles.dateInput}
+                style={[styles.dateInput, errors.date && styles.inputError]}
                 onPress={() => setShowDatePicker(!showDatePicker)}
               >
                 <Text style={styles.dateValue}>
-                  {formData.date.toLocaleDateString('ru-RU')}
+                  {dayjs(formData.date).format('DD.MM.YYYY')}
                 </Text>
                 <Ionicons name="calendar" size={20} color="#007AFF" />
               </TouchableOpacity>
@@ -502,114 +642,276 @@ export default function ScheduleManagement() {
                   onChange={handleDateChange}
                 />
               )}
+              {errors.date && <Text style={styles.errorText}>{errors.date}</Text>}
             </View>
 
             <View style={styles.formGroup}>
-              <Text style={styles.formLabel}>Группа</Text>
-              <TextInput
-                style={styles.formInput}
-                placeholder="Например: 2211-0101.1"
-                value={formData.groupName}
-                onChangeText={(text) => setFormData({ ...formData, groupName: text })}
-              />
+              <Text style={styles.formLabel}>Группа <Text style={styles.requiredText}>*</Text></Text>
+              <View style={styles.suggestionsContainer}>
+                <TextInput
+                  style={[styles.formInput, errors.group_name && styles.inputError]}
+                  placeholder="Например: 2211-0101.1"
+                  value={formData.group_name}
+                  onChangeText={(text) => {
+                    setFormData(prev => ({ ...prev, group_name: text }));
+                    filterGroups(text);
+                    clearError('group_name');
+                  }}
+                  onFocus={() => filterGroups(formData.group_name)}
+                  onBlur={() => setTimeout(() => setShowGroupSuggestions(false), 200)}
+                />
+                {showGroupSuggestions && filteredGroups.length > 0 && (
+                  <View style={styles.suggestions}>
+                    {filteredGroups.map((group, index) => (
+                      <TouchableOpacity
+                        key={index}
+                        style={styles.suggestionItem}
+                        onPress={() => {
+                          setFormData(prev => ({ ...prev, group_name: group }));
+                          setShowGroupSuggestions(false);
+                        }}
+                      >
+                        <Text style={styles.suggestionText}>{group}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                )}
+              </View>
+              {errors.group_name && <Text style={styles.errorText}>{errors.group_name}</Text>}
             </View>
 
             <View style={styles.formGroup}>
-              <Text style={styles.formLabel}>Предмет</Text>
+              <Text style={styles.formLabel}>Предмет <Text style={styles.requiredText}>*</Text></Text>
               <TextInput
-                style={styles.formInput}
+                style={[styles.formInput, errors.subject && styles.inputError]}
                 placeholder="Название предмета"
                 value={formData.subject}
-                onChangeText={(text) => setFormData({ ...formData, subject: text })}
+                onChangeText={(text) => {
+                  setFormData(prev => ({ ...prev, subject: text }));
+                  clearError('subject');
+                }}
               />
+              {errors.subject && <Text style={styles.errorText}>{errors.subject}</Text>}
             </View>
 
             <View style={styles.formGroup}>
-              <Text style={styles.formLabel}>Тип занятия</Text>
+              <Text style={styles.formLabel}>Тип занятия <Text style={styles.requiredText}>*</Text></Text>
               <View style={styles.segmentedButtons}>
                 {['Лекция', 'Практика', 'Лабораторная', 'Семинар'].map((type) => (
                   <TouchableOpacity
                     key={type}
                     style={[
                       styles.segmentButton,
-                      formData.lessonType === type && styles.activeSegmentButton,
-                      formData.lessonType === type && { backgroundColor: getLessonTypeColor(type) }
+                      formData.lesson_type === type && styles.activeSegmentButton,
+                      formData.lesson_type === type && { backgroundColor: getLessonTypeColor(type) }
                     ]}
-                    onPress={() => setFormData({ ...formData, lessonType: type })}
+                    onPress={() => {
+                      setFormData(prev => ({ ...prev, lesson_type: type }));
+                      clearError('lesson_type');
+                    }}
                   >
                     <Text style={[
                       styles.segmentButtonText,
-                      formData.lessonType === type && styles.activeSegmentButtonText
+                      formData.lesson_type === type && styles.activeSegmentButtonText
                     ]}>
                       {type}
                     </Text>
                   </TouchableOpacity>
                 ))}
               </View>
+              {errors.lesson_type && <Text style={styles.errorText}>{errors.lesson_type}</Text>}
             </View>
 
             <View style={styles.formRow}>
               <View style={[styles.formGroup, { flex: 1, marginRight: 8 }]}>
-                <Text style={styles.formLabel}>Начало</Text>
+                <Text style={styles.formLabel}>Начало <Text style={styles.requiredText}>*</Text></Text>
                 <TextInput
-                  style={styles.formInput}
-                  placeholder="HH:MM"
-                  value={formData.timeStart}
-                  onChangeText={(text) => setFormData({ ...formData, timeStart: text })}
+                  style={[styles.formInput, errors.time_start && styles.inputError]}
+                  placeholder="ЧЧ:ММ"
+                  value={formData.time_start}
+                  onChangeText={(text) => {
+                    setFormData(prev => ({ ...prev, time_start: text }));
+                    clearError('time_start');
+                  }}
                   keyboardType="numbers-and-punctuation"
                 />
+                {errors.time_start && <Text style={styles.errorText}>{errors.time_start}</Text>}
               </View>
               <View style={[styles.formGroup, { flex: 1, marginLeft: 8 }]}>
-                <Text style={styles.formLabel}>Окончание</Text>
+                <Text style={styles.formLabel}>Окончание <Text style={styles.requiredText}>*</Text></Text>
                 <TextInput
-                  style={styles.formInput}
-                  placeholder="HH:MM"
-                  value={formData.timeEnd}
-                  onChangeText={(text) => setFormData({ ...formData, timeEnd: text })}
+                  style={[styles.formInput, errors.time_end && styles.inputError]}
+                  placeholder="ЧЧ:ММ"
+                  value={formData.time_end}
+                  onChangeText={(text) => {
+                    setFormData(prev => ({ ...prev, time_end: text }));
+                    clearError('time_end');
+                  }}
                   keyboardType="numbers-and-punctuation"
                 />
+                {errors.time_end && <Text style={styles.errorText}>{errors.time_end}</Text>}
               </View>
             </View>
 
             <View style={styles.formGroup}>
-              <Text style={styles.formLabel}>Преподаватель</Text>
-              <TextInput
-                style={styles.formInput}
-                placeholder="ФИО преподавателя"
-                value={formData.teacherName}
-                onChangeText={(text) => setFormData({ ...formData, teacherName: text })}
-              />
+              <Text style={styles.formLabel}>Преподаватель <Text style={styles.requiredText}>*</Text></Text>
+              <View style={styles.suggestionsContainer}>
+                <TextInput
+                  style={[styles.formInput, errors.teacher_name && styles.inputError]}
+                  placeholder="ФИО преподавателя"
+                  value={formData.teacher_name}
+                  onChangeText={(text) => {
+                    setFormData(prev => ({ ...prev, teacher_name: text }));
+                    filterTeachers(text);
+                    clearError('teacher_name');
+                  }}
+                  onFocus={() => filterTeachers(formData.teacher_name)}
+                  onBlur={() => setTimeout(() => setShowTeacherSuggestions(false), 200)}
+                />
+                {showTeacherSuggestions && filteredTeachers.length > 0 && (
+                  <View style={styles.suggestions}>
+                    {filteredTeachers.map((teacher, index) => (
+                      <TouchableOpacity
+                        key={index}
+                        style={styles.suggestionItem}
+                        onPress={() => {
+                          setFormData(prev => ({ ...prev, teacher_name: teacher }));
+                          setShowTeacherSuggestions(false);
+                        }}
+                      >
+                        <Text style={styles.suggestionText}>{teacher}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                )}
+              </View>
+              {errors.teacher_name && <Text style={styles.errorText}>{errors.teacher_name}</Text>}
             </View>
 
             <View style={styles.formRow}>
               <View style={[styles.formGroup, { flex: 2, marginRight: 8 }]}>
-                <Text style={styles.formLabel}>Аудитория</Text>
+                <Text style={styles.formLabel}>Аудитория <Text style={styles.requiredText}>*</Text></Text>
                 <TextInput
-                  style={styles.formInput}
+                  style={[styles.formInput, errors.auditory && styles.inputError]}
                   placeholder="Номер аудитории"
                   value={formData.auditory}
-                  onChangeText={(text) => setFormData({ ...formData, auditory: text })}
+                  onChangeText={(text) => {
+                    setFormData(prev => ({ ...prev, auditory: text }));
+                    clearError('auditory');
+                  }}
                 />
+                {errors.auditory && <Text style={styles.errorText}>{errors.auditory}</Text>}
               </View>
               <View style={[styles.formGroup, { flex: 1, marginLeft: 8 }]}>
                 <Text style={styles.formLabel}>Подгруппа</Text>
                 <TextInput
                   style={styles.formInput}
                   placeholder="0 - для всех"
-                  value={formData.subgroup.toString()}
-                  onChangeText={(text) => setFormData({ ...formData, subgroup: text })}
+                  value={formData.subgroup?.toString()}
+                  onChangeText={(text) => setFormData(prev => ({ ...prev, subgroup: text }))}
                   keyboardType="numeric"
                 />
               </View>
             </View>
 
+            <View style={styles.formGroup}>
+              <Text style={styles.formLabel}>Дополнительная информация</Text>
+              <View style={styles.formRow}>
+                <View style={[styles.formGroup, { flex: 1, marginRight: 8 }]}>
+                  <Text style={styles.formSubLabel}>Семестр</Text>
+                  <TextInput
+                    style={styles.formInput}
+                    placeholder="Семестр"
+                    value={formData.semester?.toString()}
+                    onChangeText={(text) => setFormData(prev => ({ ...prev, semester: text }))}
+                    keyboardType="numeric"
+                  />
+                </View>
+                <View style={[styles.formGroup, { flex: 1, marginLeft: 8 }]}>
+                  <Text style={styles.formSubLabel}>Неделя</Text>
+                  <TextInput
+                    style={styles.formInput}
+                    placeholder="Номер недели"
+                    value={formData.week_number?.toString()}
+                    onChangeText={(text) => setFormData(prev => ({ ...prev, week_number: text }))}
+                    keyboardType="numeric"
+                  />
+                </View>
+              </View>
+              <View style={styles.formRow}>
+                <View style={[styles.formGroup, { flex: 1, marginRight: 8 }]}>
+                  <Text style={styles.formSubLabel}>Курс</Text>
+                  <TextInput
+                    style={styles.formInput}
+                    placeholder="Курс"
+                    value={formData.course?.toString()}
+                    onChangeText={(text) => setFormData(prev => ({ ...prev, course: text }))}
+                    keyboardType="numeric"
+                  />
+                </View>
+                <View style={[styles.formGroup, { flex: 1, marginLeft: 8 }]}>
+                  <Text style={styles.formSubLabel}>Факультет</Text>
+                  <TextInput
+                    style={styles.formInput}
+                    placeholder="Факультет"
+                    value={formData.faculty}
+                    onChangeText={(text) => setFormData(prev => ({ ...prev, faculty: text }))}
+                  />
+                </View>
+              </View>
+            </View>
+
             <TouchableOpacity
-              style={styles.saveButton}
+              style={[styles.saveButton, isSubmitting && styles.disabledButton]}
               onPress={handleSaveSchedule}
+              disabled={isSubmitting}
             >
-              <Text style={styles.saveButtonText}>Сохранить</Text>
+              {isSubmitting ? (
+                <ActivityIndicator size="small" color="#FFFFFF" />
+              ) : (
+                <Text style={styles.saveButtonText}>Сохранить</Text>
+              )}
             </TouchableOpacity>
           </ScrollView>
+        </View>
+      </KeyboardAvoidingView>
+    </Modal>
+  );
+
+  // Delete confirmation modal
+  const DeleteConfirmationModal = () => (
+    <Modal
+      animationType="fade"
+      transparent={true}
+      visible={confirmDeleteVisible}
+      onRequestClose={() => setConfirmDeleteVisible(false)}
+    >
+      <View style={styles.confirmOverlay}>
+        <View style={styles.confirmBox}>
+          <Text style={styles.confirmTitle}>Удаление занятия</Text>
+          <Text style={styles.confirmText}>
+            Вы уверены, что хотите удалить занятие по предмету "{selectedSchedule?.subject}" для группы {selectedSchedule?.group_name}?
+          </Text>
+          <View style={styles.confirmButtons}>
+            <TouchableOpacity
+              style={[styles.confirmButton, styles.cancelButton]}
+              onPress={() => setConfirmDeleteVisible(false)}
+              disabled={isSubmitting}
+            >
+              <Text style={styles.cancelButtonText}>Отмена</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.confirmButton, styles.deleteConfirmButton]}
+              onPress={confirmDeleteSchedule}
+              disabled={isSubmitting}
+            >
+              {isSubmitting ? (
+                <ActivityIndicator size="small" color="#FFFFFF" />
+              ) : (
+                <Text style={styles.deleteConfirmText}>Удалить</Text>
+              )}
+            </TouchableOpacity>
+          </View>
         </View>
       </View>
     </Modal>
@@ -714,6 +1016,7 @@ export default function ScheduleManagement() {
       </TouchableOpacity>
 
       <ScheduleFormModal />
+      <DeleteConfirmationModal />
     </SafeAreaView>
   );
 }
@@ -969,8 +1272,17 @@ const styles = StyleSheet.create({
   },
   formLabel: {
     fontSize: 14,
-    color: '#8E8E93',
+    color: '#151940',
+    fontWeight: '500',
     marginBottom: 8,
+  },
+  formSubLabel: {
+    fontSize: 13,
+    color: '#8E8E93',
+    marginBottom: 6,
+  },
+  requiredText: {
+    color: '#FF3B30',
   },
   formInput: {
     backgroundColor: '#F5F5F5',
@@ -979,6 +1291,15 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     fontSize: 16,
     color: '#151940',
+  },
+  inputError: {
+    borderWidth: 1,
+    borderColor: '#FF3B30',
+  },
+  errorText: {
+    color: '#FF3B30',
+    fontSize: 12,
+    marginTop: 4,
   },
   dateInput: {
     backgroundColor: '#F5F5F5',
@@ -1022,6 +1343,10 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     alignItems: 'center',
     marginTop: 16,
+    marginBottom: 20,
+  },
+  disabledButton: {
+    opacity: 0.7,
   },
   saveButtonText: {
     fontSize: 16,
@@ -1068,5 +1393,87 @@ const styles = StyleSheet.create({
   datePickerItemTextSelected: {
     color: '#FFFFFF',
     fontWeight: '600',
+  },
+  suggestionsContainer: {
+    position: 'relative',
+    zIndex: 1000,
+  },
+  suggestions: {
+    position: 'absolute',
+    top: '100%',
+    left: 0,
+    right: 0,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E5E5EA',
+    borderRadius: 8,
+    maxHeight: 180,
+    zIndex: 1001,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  suggestionItem: {
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F2F2F7',
+  },
+  suggestionText: {
+    fontSize: 14,
+    color: '#151940',
+  },
+  confirmOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+  },
+  confirmBox: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    width: '100%',
+    padding: 20,
+  },
+  confirmTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#151940',
+    marginBottom: 12,
+  },
+  confirmText: {
+    fontSize: 15,
+    color: '#3C3C43',
+    marginBottom: 20,
+    lineHeight: 20,
+  },
+  confirmButtons: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+  },
+  confirmButton: {
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    marginLeft: 8,
+  },
+  cancelButton: {
+    backgroundColor: '#F2F2F7',
+  },
+  cancelButtonText: {
+    fontSize: 14,
+    color: '#3C3C43',
+    fontWeight: '500',
+  },
+  deleteConfirmButton: {
+    backgroundColor: '#FF3B30',
+  },
+  deleteConfirmText: {
+    fontSize: 14,
+    color: '#FFFFFF',
+    fontWeight: '500',
   },
 });
