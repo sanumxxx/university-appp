@@ -1,3 +1,4 @@
+// app/auth.js
 import { useState, useEffect } from 'react';
 import {
   View,
@@ -156,8 +157,10 @@ export default function Auth() {
       setIsLoading(true);
       const endpoint = isLoginMode ? '/login' : '/register';
       const response = await api.post(endpoint, formData);
-      await login(response.data.user, response.data.token);
-      router.replace('/(tabs)/schedule');
+
+      // Получаем правильный маршрут в зависимости от роли
+      const redirectPath = await login(response.data.user, response.data.token);
+      router.replace(redirectPath);
     } catch (error) {
       console.error('Login error:', error);
       const errorMessage = error.response?.data?.error || 'Произошла ошибка';
@@ -337,6 +340,31 @@ export default function Auth() {
                       Преподаватель
                     </Text>
                   </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[
+                      styles.userTypeButton,
+                      formData.userType === 'admin' && styles.userTypeButtonActive,
+                    ]}
+                    onPress={() => {
+                      setFormData((prev) => ({ ...prev, userType: 'admin', group: '', teacher: '' }));
+                      if (errors.userType) setErrors((prev) => ({ ...prev, userType: null }));
+                    }}
+                  >
+                    <Ionicons
+                      name="shield-outline"
+                      size={24}
+                      color={formData.userType === 'admin' ? '#007AFF' : '#8E8E93'}
+                    />
+                    <Text
+                      style={[
+                        styles.userTypeText,
+                        formData.userType === 'admin' && styles.userTypeTextActive,
+                      ]}
+                    >
+                      Администратор
+                    </Text>
+                  </TouchableOpacity>
                 </View>
 
                 {formData.userType === 'student' && (
@@ -426,6 +454,15 @@ export default function Auth() {
                     {errors.teacher && <Text style={styles.errorText}>{errors.teacher}</Text>}
                   </View>
                 )}
+
+                {formData.userType === 'admin' && (
+                  <View style={styles.adminNoticeContainer}>
+                    <Ionicons name="information-circle" size={24} color="#007AFF" />
+                    <Text style={styles.adminNoticeText}>
+                      Аккаунты администраторов подлежат обязательной проверке. После регистрации обратитесь в IT-отдел университета.
+                    </Text>
+                  </View>
+                )}
               </>
             )}
 
@@ -461,240 +498,255 @@ export default function Auth() {
               }}
             >
               <Text style={styles.switchModeText}>
- {isLoginMode
-   ? 'Нет аккаунта? Зарегистрируйтесь'
-   : 'Уже есть аккаунт? Войдите'}
-</Text>
-             </TouchableOpacity>
-         </Animatable.View>
-       </ScrollView>
-     </SafeAreaView>
-   </KeyboardAvoidingView>
- );
+                {isLoginMode
+                  ? 'Нет аккаунта? Зарегистрируйтесь'
+                  : 'Уже есть аккаунт? Войдите'}
+              </Text>
+            </TouchableOpacity>
+          </Animatable.View>
+        </ScrollView>
+      </SafeAreaView>
+    </KeyboardAvoidingView>
+  );
 }
 
 const styles = StyleSheet.create({
- container: {
-   flex: 1,
-   backgroundColor: '#FFFFFF',
- },
- scrollView: {
-   flex: 1,
- },
- scrollContent: {
-   flexGrow: 1,
-   paddingVertical: 30,
-   paddingHorizontal: 20,
- },
- header: {
-   alignItems: 'center',
-   marginBottom: 40,
- },
- headerTitle: {
-   fontSize: 36,
-   fontWeight: '800',
-   color: '#000000',
-   letterSpacing: -0.5,
- },
- headerSubtitle: {
-   fontSize: 17,
-   color: '#8E8E93',
-   marginTop: 8,
-   fontWeight: '400',
- },
- form: {
-   width: '100%',
- },
- inputContainer: {
-   marginBottom: 24,
- },
- label: {
-   fontSize: 15,
-   color: '#000000',
-   marginBottom: 8,
-   fontWeight: '600',
- },
- input: {
-   backgroundColor: '#F7F7F7',
-   borderRadius: 14,
-   paddingHorizontal: 16,
-   paddingVertical: 12,
-   fontSize: 17,
-   color: '#000000',
-   borderWidth: 1,
-   borderColor: '#E5E5EA',
-   shadowColor: '#000',
-   shadowOffset: { width: 0, height: 1 },
-   shadowOpacity: 0.1,
-   shadowRadius: 2,
-   elevation: 2,
- },
- inputError: {
-   borderColor: '#FF3B30',
-   borderWidth: 1.5,
- },
- errorText: {
-   color: '#FF3B30',
-   fontSize: 13,
-   marginTop: 6,
-   fontWeight: '500',
- },
- passwordContainer: {
-   flexDirection: 'row',
-   alignItems: 'center',
-   backgroundColor: '#F7F7F7',
-   borderRadius: 14,
-   borderWidth: 1,
-   borderColor: '#E5E5EA',
-   shadowColor: '#000',
-   shadowOffset: { width: 0, height: 1 },
-   shadowOpacity: 0.1,
-   shadowRadius: 2,
-   elevation: 2,
- },
- passwordIcon: {
-   padding: 12,
- },
- passwordStrengthContainer: {
-   flexDirection: 'row',
-   flexWrap: 'wrap',
-   marginTop: 10,
-   gap: 12,
- },
- strengthCheck: {
-   flexDirection: 'row',
-   alignItems: 'center',
- },
- strengthText: {
-   fontSize: 13,
-   color: '#8E8E93',
-   marginLeft: 4,
-   fontWeight: '500',
- },
- strengthTextValid: {
-   color: '#34C759',
- },
- userTypeContainer: {
-   flexDirection: 'row',
-   justifyContent: 'space-between',
-   marginBottom: 24,
-   gap: 12,
- },
- userTypeButton: {
-   flex: 1,
-   flexDirection: 'row',
-   alignItems: 'center',
-   justifyContent: 'center',
-   backgroundColor: '#F7F7F7',
-   borderRadius: 14,
-   paddingVertical: 14,
-   borderWidth: 1,
-   borderColor: '#E5E5EA',
-   shadowColor: '#000',
-   shadowOffset: { width: 0, height: 1 },
-   shadowOpacity: 0.1,
-   shadowRadius: 2,
-   elevation: 2,
- },
- userTypeButtonActive: {
-   borderColor: '#007AFF',
-   backgroundColor: '#F0F8FF',
- },
- userTypeText: {
-   fontSize: 17,
-   color: '#000000',
-   marginLeft: 8,
-   fontWeight: '500',
- },
- userTypeTextActive: {
-   color: '#007AFF',
-   fontWeight: '600',
- },
- selectButton: {
-   flexDirection: 'row',
-   alignItems: 'center',
-   justifyContent: 'space-between',
-   backgroundColor: '#F7F7F7',
-   borderRadius: 14,
-   paddingHorizontal: 16,
-   paddingVertical: 12,
-   borderWidth: 1,
-   borderColor: '#E5E5EA',
-   shadowColor: '#000',
-   shadowOffset: { width: 0, height: 1 },
-   shadowOpacity: 0.1,
-   shadowRadius: 2,
-   elevation: 2,
- },
- selectButtonError: {
-   borderColor: '#FF3B30',
-   borderWidth: 1.5,
- },
- selectButtonText: {
-   fontSize: 17,
-   color: '#000000',
-   fontWeight: '400',
- },
- placeholderText: {
-   color: '#8E8E93',
- },
- submitButton: {
-   borderRadius: 14,
-   marginTop: 32,
-   overflow: 'hidden',
- },
- submitButtonInner: {
-   backgroundColor: '#007AFF',
-   paddingVertical: 14,
-   alignItems: 'center',
-   justifyContent: 'center',
- },
- submitButtonDisabled: {
-   opacity: 0.6,
- },
- submitButtonText: {
-   color: '#FFFFFF',
-   fontSize: 17,
-   fontWeight: '600',
-   letterSpacing: -0.3,
- },
- switchModeButton: {
-   alignItems: 'center',
-   marginTop: 20,
-   padding: 10,
- },
- switchModeText: {
-   color: '#007AFF',
-   fontSize: 15,
-   fontWeight: '500',
- },
- suggestionsContainer: {
-   backgroundColor: '#FFFFFF',
-   borderWidth: 1,
-   borderColor: '#E5E5EA',
-   borderRadius: 10,
-   marginTop: 4,
-   maxHeight: 180,
-   overflow: 'hidden',
-   shadowColor: '#000',
-   shadowOffset: { width: 0, height: 2 },
-   shadowOpacity: 0.1,
-   shadowRadius: 4,
-   elevation: 3,
-   zIndex: 100,
- },
- suggestionItem: {
-   flexDirection: 'row',
-   alignItems: 'center',
-   padding: 12,
-   borderBottomWidth: 1,
-   borderBottomColor: '#E5E5EA',
- },
- suggestionIcon: {
-   marginRight: 8,
- },
- suggestionText: {
-   fontSize: 16,
-   color: '#000000',
- },
+  container: {
+    flex: 1,
+    backgroundColor: '#FFFFFF',
+  },
+  scrollView: {
+    flex: 1,
+  },
+  scrollContent: {
+    flexGrow: 1,
+    paddingVertical: 30,
+    paddingHorizontal: 20,
+  },
+  header: {
+    alignItems: 'center',
+    marginBottom: 40,
+  },
+  headerTitle: {
+    fontSize: 36,
+    fontWeight: '800',
+    color: '#000000',
+    letterSpacing: -0.5,
+  },
+  headerSubtitle: {
+    fontSize: 17,
+    color: '#8E8E93',
+    marginTop: 8,
+    fontWeight: '400',
+  },
+  form: {
+    width: '100%',
+  },
+  inputContainer: {
+    marginBottom: 24,
+  },
+  label: {
+    fontSize: 15,
+    color: '#000000',
+    marginBottom: 8,
+    fontWeight: '600',
+  },
+  input: {
+    backgroundColor: '#F7F7F7',
+    borderRadius: 14,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    fontSize: 17,
+    color: '#000000',
+    borderWidth: 1,
+    borderColor: '#E5E5EA',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  inputError: {
+    borderColor: '#FF3B30',
+    borderWidth: 1.5,
+  },
+  errorText: {
+    color: '#FF3B30',
+    fontSize: 13,
+    marginTop: 6,
+    fontWeight: '500',
+  },
+  passwordContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F7F7F7',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#E5E5EA',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  passwordIcon: {
+    padding: 12,
+  },
+  passwordStrengthContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    marginTop: 10,
+    gap: 12,
+  },
+  strengthCheck: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  strengthText: {
+    fontSize: 13,
+    color: '#8E8E93',
+    marginLeft: 4,
+    fontWeight: '500',
+  },
+  strengthTextValid: {
+    color: '#34C759',
+  },
+  userTypeContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 24,
+    gap: 8,
+  },
+  userTypeButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#F7F7F7',
+    borderRadius: 14,
+    paddingVertical: 14,
+    borderWidth: 1,
+    borderColor: '#E5E5EA',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  userTypeButtonActive: {
+    borderColor: '#007AFF',
+    backgroundColor: '#F0F8FF',
+  },
+  userTypeText: {
+    fontSize: 14,
+    color: '#000000',
+    marginLeft: 8,
+    fontWeight: '500',
+  },
+  userTypeTextActive: {
+    color: '#007AFF',
+    fontWeight: '600',
+  },
+  selectButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#F7F7F7',
+    borderRadius: 14,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderWidth: 1,
+    borderColor: '#E5E5EA',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  selectButtonError: {
+    borderColor: '#FF3B30',
+    borderWidth: 1.5,
+  },
+  selectButtonText: {
+    fontSize: 17,
+    color: '#000000',
+    fontWeight: '400',
+  },
+  placeholderText: {
+    color: '#8E8E93',
+  },
+  submitButton: {
+    borderRadius: 14,
+    marginTop: 32,
+    overflow: 'hidden',
+  },
+  submitButtonInner: {
+    backgroundColor: '#007AFF',
+    paddingVertical: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  submitButtonDisabled: {
+    opacity: 0.6,
+  },
+  submitButtonText: {
+    color: '#FFFFFF',
+    fontSize: 17,
+    fontWeight: '600',
+    letterSpacing: -0.3,
+  },
+  switchModeButton: {
+    alignItems: 'center',
+    marginTop: 20,
+    padding: 10,
+  },
+  switchModeText: {
+    color: '#007AFF',
+    fontSize: 15,
+    fontWeight: '500',
+  },
+  suggestionsContainer: {
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E5E5EA',
+    borderRadius: 10,
+    marginTop: 4,
+    maxHeight: 180,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+    zIndex: 100,
+  },
+  suggestionItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E5EA',
+  },
+  suggestionIcon: {
+    marginRight: 8,
+  },
+  suggestionText: {
+    fontSize: 16,
+    color: '#000000',
+  },
+  adminNoticeContainer: {
+    flexDirection: 'row',
+    backgroundColor: '#F0F8FF',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 24,
+    borderWidth: 1,
+    borderColor: '#D0E7FF',
+  },
+  adminNoticeText: {
+    flex: 1,
+    fontSize: 14,
+    color: '#007AFF',
+    marginLeft: 8,
+  },
 });

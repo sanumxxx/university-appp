@@ -1,3 +1,4 @@
+// context/auth.js - обновленная версия
 import React, { createContext, useState, useContext, useEffect } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import api from '../utils/api';
@@ -34,6 +35,13 @@ export function AuthProvider({ children }) {
       await AsyncStorage.setItem('user', JSON.stringify(userData));
       api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
       setUser(userData);
+
+      // Возвращаем базовый маршрут в зависимости от роли пользователя
+      if (userData.userType === 'admin') {
+        return '/(admin)/dashboard';
+      } else {
+        return '/(tabs)/schedule';
+      }
     } catch (error) {
       console.error('Error during login:', error);
       throw error;
@@ -52,10 +60,14 @@ export function AuthProvider({ children }) {
     }
   };
 
+  // Проверка на роль администратора
+  const isAdmin = user?.userType === 'admin';
+
   return (
     <AuthContext.Provider value={{
       isLoading,
       user,
+      isAdmin,  // Добавляем удобный флаг для проверки роли
       login,
       logout
     }}>

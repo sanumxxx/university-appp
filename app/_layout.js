@@ -1,6 +1,6 @@
+// app/_layout.js - обновленная версия
 import { Stack } from 'expo-router';
-import { AuthProvider } from '../context/auth';
-import { useAuth } from '../context/auth';
+import { AuthProvider, useAuth } from '../context/auth';
 import { View, ActivityIndicator } from 'react-native';
 
 // Создаем отдельный компонент для навигации
@@ -19,6 +19,8 @@ function RootLayoutNav() {
     <Stack screenOptions={{ headerShown: false }}>
       <Stack.Screen name="index" />
       <Stack.Screen name="(tabs)" />
+      <Stack.Screen name="(admin)" />
+      <Stack.Screen name="auth" />
     </Stack>
   );
 }
