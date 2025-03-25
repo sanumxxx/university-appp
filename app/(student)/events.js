@@ -1,3 +1,4 @@
+// app/(student)/events.js
 import React, { useState, useEffect } from 'react';
 import {
   View,
@@ -7,6 +8,7 @@ import {
   TouchableOpacity,
   Image,
   RefreshControl,
+    ScrollView,
   Dimensions,
   Animated,
   Alert,
@@ -40,11 +42,11 @@ const getShortMonth = (month) => {
     'ноября': 'НОЯ',
     'декабря': 'ДЕК',
   };
-  
+
   return monthNames[month] || month.slice(0, 3).toUpperCase();
 };
 
-export default function Events() {
+export default function StudentEvents() {
   const { user } = useAuth();
   const [events, setEvents] = useState([]);
   const [filteredEvents, setFilteredEvents] = useState([]);
@@ -53,7 +55,7 @@ export default function Events() {
   const [selectedCategory, setSelectedCategory] = useState('all');
   const [userRegistrations, setUserRegistrations] = useState([]);
   const [registrationInProgress, setRegistrationInProgress] = useState(false);
-  
+
   // Категории мероприятий с цветовой кодировкой
   const eventCategories = [
     { id: 'science', name: 'Наука', color: '#5F66F2' },
@@ -62,7 +64,7 @@ export default function Events() {
     { id: 'education', name: 'Образование', color: '#2691EE' },
     { id: 'career', name: 'Карьера', color: '#FF4B8A' },
   ];
-  
+
   // Примерные данные о мероприятиях
   const demoEvents = [
     {
@@ -147,16 +149,16 @@ export default function Events() {
     try {
       // В реальном приложении здесь будет API запрос
       await new Promise(resolve => setTimeout(resolve, 800));
-      
+
       // Используем демо-данные
       setEvents(demoEvents);
       setFilteredEvents(demoEvents);
-      
+
       // Сохраняем в кэш
       await AsyncStorage.setItem('cached_events', JSON.stringify(demoEvents));
     } catch (error) {
       console.error('Ошибка загрузки мероприятий:', error);
-      
+
       // Пытаемся загрузить из кэша
       try {
         const cachedEvents = await AsyncStorage.getItem('cached_events');
@@ -195,19 +197,19 @@ export default function Events() {
   // Регистрация на мероприятие
   const registerForEvent = async (eventId) => {
     if (registrationInProgress) return;
-    
+
     setRegistrationInProgress(true);
     try {
       // В реальном приложении здесь будет API запрос
       await new Promise(resolve => setTimeout(resolve, 500));
-      
+
       // Обновляем список регистраций
       const updatedRegistrations = [...userRegistrations, eventId];
       setUserRegistrations(updatedRegistrations);
-      
+
       // Сохраняем в локальное хранилище
       await AsyncStorage.setItem(`user_registrations_${user.id}`, JSON.stringify(updatedRegistrations));
-      
+
       // Обновляем количество зарегистрированных для мероприятия
       const updatedEvents = events.map(event => {
         if (event.id === eventId) {
@@ -215,14 +217,14 @@ export default function Events() {
         }
         return event;
       });
-      
+
       setEvents(updatedEvents);
       setFilteredEvents(
         selectedCategory === 'all'
           ? updatedEvents
           : updatedEvents.filter(event => event.category === selectedCategory)
       );
-      
+
       Alert.alert(
         'Успешная регистрация',
         'Вы зарегистрированы на мероприятие. Информация будет доступна в вашем профиле.'
@@ -238,18 +240,18 @@ export default function Events() {
   // Отмена регистрации
   const cancelRegistration = async (eventId) => {
     if (registrationInProgress) return;
-    
+
     setRegistrationInProgress(true);
     try {
       await new Promise(resolve => setTimeout(resolve, 500));
-      
+
       // Обновляем список регистраций
       const updatedRegistrations = userRegistrations.filter(id => id !== eventId);
       setUserRegistrations(updatedRegistrations);
-      
+
       // Сохраняем в локальное хранилище
       await AsyncStorage.setItem(`user_registrations_${user.id}`, JSON.stringify(updatedRegistrations));
-      
+
       // Обновляем количество зарегистрированных для мероприятия
       const updatedEvents = events.map(event => {
         if (event.id === eventId) {
@@ -257,14 +259,14 @@ export default function Events() {
         }
         return event;
       });
-      
+
       setEvents(updatedEvents);
       setFilteredEvents(
         selectedCategory === 'all'
           ? updatedEvents
           : updatedEvents.filter(event => event.category === selectedCategory)
       );
-      
+
       Alert.alert(
         'Регистрация отменена',
         'Вы успешно отменили регистрацию на мероприятие'
@@ -324,7 +326,7 @@ export default function Events() {
           selectedCategory === 'all' && styles.activeFilterText
         ]}>Все</Text>
       </TouchableOpacity>
-      
+
       {eventCategories.map(category => (
         <TouchableOpacity
           key={category.id}
@@ -351,14 +353,14 @@ export default function Events() {
     const isFull = event.registered >= event.capacity;
     const categoryColor = getCategoryColor(event.category);
     const categoryName = getCategoryName(event.category);
-    
+
     // Рассчитываем процент заполнения
     const fillPercentage = Math.min(100, Math.round((event.registered / event.capacity) * 100));
     const isCritical = fillPercentage > 90;
-    
+
     return (
       <View style={styles.eventCard}>
-        <TouchableOpacity 
+        <TouchableOpacity
           style={styles.cardTouchable}
           activeOpacity={0.9}
           onPress={() => {
@@ -375,44 +377,44 @@ export default function Events() {
             );
           }}
         >
-          <Image 
+          <Image
             source={{ uri: event.image }}
             style={styles.eventImage}
             defaultSource={require('../../assets/icon.png')}
           />
-          
+
           <LinearGradient
             colors={['rgba(0,0,0,0)', 'rgba(0,0,0,0.7)']}
             style={styles.imageGradient}
           />
-          
+
           <View style={[styles.categoryBadge, { backgroundColor: categoryColor }]}>
             <Text style={styles.categoryText}>{categoryName}</Text>
           </View>
-          
+
           <View style={styles.dateCircle}>
             <Text style={styles.dateDay}>{eventDate.day}</Text>
             <Text style={styles.dateMonth}>{eventDate.shortMonth}</Text>
           </View>
-          
+
           <View style={styles.eventContent}>
             <Text style={styles.eventTitle} numberOfLines={2}>
               {event.title}
             </Text>
-            
+
             <View style={styles.eventDetails}>
               <View style={styles.eventInfo}>
                 <View style={styles.infoRow}>
                   <Ionicons name="time-outline" size={16} color="#8F9BB3" />
                   <Text style={styles.infoText}>{eventDate.time}</Text>
                 </View>
-                
+
                 <View style={styles.infoRow}>
                   <Ionicons name="location-outline" size={16} color="#8F9BB3" />
                   <Text style={styles.infoText} numberOfLines={1}>{event.location}</Text>
                 </View>
               </View>
-              
+
               <View style={styles.registrationStatus}>
                 {registered ? (
                   <View style={styles.registeredBadge}>
@@ -426,7 +428,7 @@ export default function Events() {
                 ) : (
                   <View style={styles.capacityContainer}>
                     <View style={styles.capacityBar}>
-                      <View 
+                      <View
                         style={[
                           styles.capacityFill,
                           isCritical && styles.criticalFill,
@@ -450,7 +452,7 @@ export default function Events() {
   // Компонент анимированного скелетона загрузки
   const EventSkeleton = () => {
     const pulseAnim = useState(new Animated.Value(0.3))[0];
-    
+
     useEffect(() => {
       const pulse = Animated.loop(
         Animated.sequence([
@@ -466,26 +468,26 @@ export default function Events() {
           })
         ])
       );
-      
+
       pulse.start();
       return () => pulse.stop();
     }, []);
-    
+
     return (
       <View style={styles.skeletonCard}>
-        <Animated.View 
-          style={[styles.skeletonImage, { opacity: pulseAnim }]} 
+        <Animated.View
+          style={[styles.skeletonImage, { opacity: pulseAnim }]}
         />
         <View style={styles.skeletonContent}>
-          <Animated.View 
-            style={[styles.skeletonTitle, { opacity: pulseAnim }]} 
+          <Animated.View
+            style={[styles.skeletonTitle, { opacity: pulseAnim }]}
           />
-          <Animated.View 
-            style={[styles.skeletonInfo, { opacity: pulseAnim }]} 
+          <Animated.View
+            style={[styles.skeletonInfo, { opacity: pulseAnim }]}
           />
           <View style={styles.skeletonFooter}>
-            <Animated.View 
-              style={[styles.skeletonBar, { opacity: pulseAnim }]} 
+            <Animated.View
+              style={[styles.skeletonBar, { opacity: pulseAnim }]}
             />
           </View>
         </View>
@@ -503,8 +505,8 @@ export default function Events() {
     <View style={styles.emptyContainer}>
       <Ionicons name="calendar-outline" size={64} color="#C7CADF" />
       <Text style={styles.emptyTitle}>
-        {selectedCategory === 'all' 
-          ? 'Нет предстоящих мероприятий' 
+        {selectedCategory === 'all'
+          ? 'Нет предстоящих мероприятий'
           : `Нет мероприятий в категории "${getCategoryName(selectedCategory)}"`
         }
       </Text>
@@ -517,13 +519,13 @@ export default function Events() {
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <StatusBar barStyle="dark-content" backgroundColor="#F8F9FF" />
-      
+
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Мероприятия университета</Text>
       </View>
-      
+
       <CategoryFilters />
-      
+
       {isLoading ? (
         <LoadingIndicator />
       ) : (
@@ -746,7 +748,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
   },
-  
+
   // Стили для состояния загрузки
   loadingContainer: {
     flex: 1,
@@ -798,7 +800,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#EDF1F7',
     borderRadius: 12,
   },
-  
+
   // Стили для пустого списка
   emptyContainer: {
     flex: 1,

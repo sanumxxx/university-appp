@@ -1,23 +1,41 @@
-import React, { useEffect } from 'react';
+// app/(student)/_layout.js
+import React from 'react';
 import { Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../context/auth';
 import { router } from 'expo-router';
+import { View, ActivityIndicator, Text } from 'react-native';
 
-export default function TabsLayout() {
-  const { user, isAdmin } = useAuth();
+export default function StudentTabsLayout() {
+  const { user, isLoading } = useAuth();
 
-  // Перенаправляем админа на его собственную панель
-  useEffect(() => {
-    if (user && user.userType === 'admin') {
-      console.log('Admin detected in tabs layout, redirecting...');
-      router.replace('/(admin)/dashboard');
+  // Check if user is logged in and is a student
+  if (isLoading) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+        <ActivityIndicator size="large" color="#007AFF" />
+      </View>
+    );
+  }
+
+  // Redirect non-students
+  if (!user || user.userType !== 'student') {
+    if (user) {
+      // Redirect to the appropriate section based on user type
+      if (user.userType === 'admin') {
+        router.replace('/(admin)/dashboard');
+      } else if (user.userType === 'teacher') {
+        router.replace('/(teacher)/schedule');
+      }
+    } else {
+      router.replace('/auth');
     }
-  }, [user]);
-
-  // Если это администратор, показываем пустой компонент пока происходит редирект
-  if (isAdmin) {
-    return null;
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+        <ActivityIndicator size="large" color="#007AFF" />
+        <Text style={{ marginTop: 10, fontSize: 16, color: '#8E8E93' }}>Redirecting...</Text>
+      </View>
+    );
   }
 
   return (
@@ -75,7 +93,7 @@ export default function TabsLayout() {
       <Tabs.Screen
         name="grades"
         options={{
-          title: user?.userType === 'teacher' ? 'Журнал' : 'Успеваемость',
+          title: 'Успеваемость',
           tabBarIcon: ({ focused, color }) => (
             <Ionicons
               name={focused ? 'document-text' : 'document-text-outline'}

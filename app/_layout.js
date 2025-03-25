@@ -1,11 +1,12 @@
-// app/_layout.js - updated version
+// app/_layout.js - updated to handle role-based routing
+import React, { useEffect } from 'react';
 import { Stack } from 'expo-router';
 import { AuthProvider, useAuth } from '../context/auth';
-import { View, ActivityIndicator } from 'react-native';
+import { View, ActivityIndicator, Text } from 'react-native';
 
-// Create a separate component for navigation
+// Create a separate component for navigation that uses the auth context
 function RootLayoutNav() {
-  const { isLoading, isAdmin, user } = useAuth();
+  const { isLoading, user } = useAuth();
 
   if (isLoading) {
     return (
@@ -15,42 +16,41 @@ function RootLayoutNav() {
     );
   }
 
-  // Customize screenOptions based on user type for better visual distinction
-  const getScreenOptions = () => {
-    if (isAdmin) {
-      return {
-        headerShown: false,
-        // Use different animation for admin screens for visual distinction
-        animation: 'slide_from_right',
-        // Admin-specific styling if needed
-        contentStyle: { backgroundColor: '#F8F9FF' }
-      };
-    }
+  // Determine user role for screen options
+  const getUserScreenOptions = () => {
+    if (!user) return { headerShown: false };
 
-    return {
-      headerShown: false
-    };
+    switch (user.userType) {
+      case 'admin':
+        return {
+          headerShown: false,
+          animation: 'slide_from_right',
+          contentStyle: { backgroundColor: '#F8F9FF' }
+        };
+      case 'teacher':
+        return {
+          headerShown: false,
+          animation: 'fade',
+          contentStyle: { backgroundColor: '#F7F9FC' }
+        };
+      default: // student
+        return {
+          headerShown: false,
+          animation: 'fade',
+          contentStyle: { backgroundColor: '#F7F9FC' }
+        };
+    }
   };
 
   return (
-    <Stack screenOptions={getScreenOptions()}>
-      <Stack.Screen name="index" />
-      <Stack.Screen
-        name="(tabs)"
-        // Prevent admin from accessing student/teacher tabs
-        listeners={{
-          beforeRemove: (e) => {
-            if (isAdmin) {
-              // Prevent navigation to tabs for admin users
-              e.preventDefault();
-              // Could redirect to admin dashboard instead
-              router.replace('/(admin)/dashboard');
-            }
-          }
-        }}
-      />
-      <Stack.Screen name="(admin)" />
-      <Stack.Screen name="auth" />
+    <Stack screenOptions={getUserScreenOptions()}>
+      <Stack.Screen name="index" options={{ headerShown: false }} />
+      <Stack.Screen name="auth" options={{ headerShown: false }} />
+
+      {/* Role-specific sections with clear separation */}
+      <Stack.Screen name="(student)" options={{ headerShown: false }} />
+      <Stack.Screen name="(teacher)" options={{ headerShown: false }} />
+      <Stack.Screen name="(admin)" options={{ headerShown: false }} />
     </Stack>
   );
 }

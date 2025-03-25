@@ -1,3 +1,4 @@
+// app/(student)/profile.js
 import React, { useState, useEffect } from 'react';
 import {
   View,
@@ -16,19 +17,10 @@ import { useAuth } from '../../context/auth';
 import { router } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-export default function Profile() {
-  // Важно: все хуки должны вызываться на верхнем уровне компонента
-  const { user, logout, isAdmin } = useAuth();
+export default function StudentProfile() {
+  const { user, logout } = useAuth();
   const [pushNotifications, setPushNotifications] = useState(true);
   const [isLoading, setIsLoading] = useState(false);
-
-  // Проверка и перенаправление админа
-  useEffect(() => {
-    if (user && user.userType === 'admin') {
-      // Перенаправляем админа на его собственную страницу профиля
-      router.replace('/(admin)/profile');
-    }
-  }, [user]);
 
   // Загрузка настроек
   useEffect(() => {
@@ -43,16 +35,6 @@ export default function Profile() {
       console.error('Error loading settings:', error);
     }
   };
-
-  // Если пользователь - админ, делаем заглушку во время перенаправления
-  if (user && user.userType === 'admin') {
-    return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#007AFF" />
-        <Text style={styles.loadingText}>Переход в панель администратора...</Text>
-      </View>
-    );
-  }
 
   // Если пользователь не авторизован, показываем загрузку
   if (!user) {
@@ -100,14 +82,9 @@ export default function Profile() {
     }
   };
 
-  // Определяем имя пользователя в зависимости от типа
-  const userType = user.userType || 'student';
-  const userName = userType === 'teacher'
-    ? (user.teacher || user.fullName || user.full_name)
-    : (user.fullName || user.full_name);
-
   // Получаем первые буквы имени для аватара
   const getInitials = () => {
+    const userName = user.fullName || user.full_name;
     const nameParts = userName.split(' ');
     if (nameParts.length >= 2) {
       return `${nameParts[0].charAt(0)}${nameParts[1].charAt(0)}`.toUpperCase();
@@ -118,7 +95,7 @@ export default function Profile() {
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>Профиль</Text>
+        <Text style={styles.headerTitle}>Профиль студента</Text>
       </View>
 
       <ScrollView
@@ -135,20 +112,56 @@ export default function Profile() {
           </View>
 
           <View style={styles.profileInfo}>
-            <Text style={styles.userName}>{userName}</Text>
-            <Text style={styles.userRole}>
-              {userType === 'teacher' ? 'Преподаватель' : 'Студент'}
-            </Text>
-            {userType === 'student' && user.group_name && (
-              <View style={styles.infoRow}>
-                <Ionicons name="people-outline" size={16} color="#8E8E93" />
-                <Text style={styles.infoText}>{user.group_name || user.group}</Text>
-              </View>
-            )}
+            <Text style={styles.userName}>{user.fullName || user.full_name}</Text>
+            <Text style={styles.userRole}>Студент</Text>
+            <View style={styles.infoRow}>
+              <Ionicons name="people-outline" size={16} color="#8E8E93" />
+              <Text style={styles.infoText}>{user.group_name || user.group}</Text>
+            </View>
             <View style={styles.infoRow}>
               <Ionicons name="mail-outline" size={16} color="#8E8E93" />
               <Text style={styles.infoText}>{user.email}</Text>
             </View>
+          </View>
+        </View>
+
+        {/* Учебная информация */}
+        <View style={styles.section}>
+          <Text style={styles.sectionHeader}>Учебная информация</Text>
+
+          <View style={styles.card}>
+            <TouchableOpacity style={styles.cardItem}>
+              <View style={styles.itemLeft}>
+                <View style={[styles.iconBg, { backgroundColor: '#007AFF' }]}>
+                  <Ionicons name="school-outline" size={16} color="#FFFFFF" />
+                </View>
+                <Text style={styles.itemText}>Моя группа</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color="#C7C7CC" />
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.cardItem}
+              onPress={() => router.push('/(student)/grades')}
+            >
+              <View style={styles.itemLeft}>
+                <View style={[styles.iconBg, { backgroundColor: '#34C759' }]}>
+                  <Ionicons name="document-text-outline" size={16} color="#FFFFFF" />
+                </View>
+                <Text style={styles.itemText}>Моя успеваемость</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color="#C7C7CC" />
+            </TouchableOpacity>
+
+            <TouchableOpacity style={styles.cardItem}>
+              <View style={styles.itemLeft}>
+                <View style={[styles.iconBg, { backgroundColor: '#FF9500' }]}>
+                  <Ionicons name="people-outline" size={16} color="#FFFFFF" />
+                </View>
+                <Text style={styles.itemText}>Мои преподаватели</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color="#C7C7CC" />
+            </TouchableOpacity>
           </View>
         </View>
 

@@ -1,4 +1,4 @@
-// context/auth.js - updated with better isAdmin check
+// context/auth.js - updated with improved role handling
 import React, { createContext, useState, useContext, useEffect } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import api from '../utils/api';
@@ -41,12 +41,8 @@ export function AuthProvider({ children }) {
 
       console.log('User logged in as:', userData.userType);
 
-      // Return base route depending on user role
-      if (userData.userType === 'admin') {
-        return '/(admin)/dashboard';
-      } else {
-        return '/(tabs)/schedule';
-      }
+      // Return home route based on user role
+      return getRoleBasedHomeRoute(userData.userType);
     } catch (error) {
       console.error('Error during login:', error);
       throw error;
@@ -65,19 +61,51 @@ export function AuthProvider({ children }) {
     }
   };
 
-  // Calculate whether the user is an admin
-  const isAdminUser = user && user.userType === 'admin';
+  // Helper function to get home route based on user role
+  const getRoleBasedHomeRoute = (userType) => {
+    switch (userType) {
+      case 'admin':
+        return '/(admin)/dashboard';
+      case 'teacher':
+        return '/(teacher)/schedule';
+      case 'student':
+      default:
+        return '/(student)/schedule';
+    }
+  };
+
+  // Helper function to get profile route based on user role
+  const getRoleBasedProfileRoute = (userType) => {
+    switch (userType) {
+      case 'admin':
+        return '/(admin)/profile';
+      case 'teacher':
+        return '/(teacher)/profile';
+      case 'student':
+      default:
+        return '/(student)/profile';
+    }
+  };
+
+  // Calculate whether the user is an admin, teacher, or student
+  const isAdmin = user && user.userType === 'admin';
+  const isTeacher = user && user.userType === 'teacher';
+  const isStudent = user && user.userType === 'student';
 
   return (
     <AuthContext.Provider value={{
       isLoading,
       user,
-      isAdmin: isAdminUser,  // Boolean flag for easy checking
+      // Role flags for easy checking
+      isAdmin,
+      isTeacher,
+      isStudent,
+      // Auth actions
       login,
       logout,
-      // Helper function to determine the correct route for the user
-      getHomeRoute: () => isAdminUser ? '/(admin)/dashboard' : '/(tabs)/schedule',
-      getProfileRoute: () => isAdminUser ? '/(admin)/profile' : '/(tabs)/profile'
+      // Helper functions
+      getHomeRoute: () => getRoleBasedHomeRoute(user?.userType),
+      getProfileRoute: () => getRoleBasedProfileRoute(user?.userType)
     }}>
       {children}
     </AuthContext.Provider>

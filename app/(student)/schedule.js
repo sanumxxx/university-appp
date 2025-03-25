@@ -1,3 +1,4 @@
+// app/(student)/schedule.js
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import {
   View,
@@ -254,9 +255,6 @@ export default function Schedule() {
   const [isOffline, setIsOffline] = useState(false);
   const [selectedLesson, setSelectedLesson] = useState(null);
   const [modalVisible, setModalVisible] = useState(false);
-  const [page, setPage] = useState(0);
-  const [hasMoreMessages, setHasMoreMessages] = useState(true);
-  const [isLoadingMore, setIsLoadingMore] = useState(false);
 
   const translateX = useSharedValue(0);
 
@@ -318,7 +316,7 @@ export default function Schedule() {
     }, 300);
   };
 
-  // Обработка данных расписания
+  // Обработка данных расписания для студентов
   const processSchedule = (data) => {
     if (!data || !Array.isArray(data)) {
       setSchedule([]);
@@ -327,13 +325,10 @@ export default function Schedule() {
 
     const timeSlots = {};
     data.forEach((lesson) => {
-      const isTeacherLesson =
-        user.userType === 'teacher' && lesson.teacher_name === user.teacher;
-      const isStudentLesson =
-        user.userType === 'student' &&
-        (lesson.subgroup === 0 || lesson.subgroup === user.subgroup || !user.subgroup);
+      // Фильтрация для студентов - проверяем подгруппу
+      const isForStudent = lesson.subgroup === 0 || lesson.subgroup === user.subgroup || !user.subgroup;
 
-      if (isTeacherLesson || isStudentLesson) {
+      if (isForStudent) {
         const timeKey = `${lesson.time_start}-${lesson.time_end}`;
         if (!timeSlots[timeKey]) {
           timeSlots[timeKey] = {
@@ -344,23 +339,7 @@ export default function Schedule() {
           };
         }
 
-        if (user.userType === 'teacher') {
-          const existingLesson = timeSlots[timeKey].lessons.find(
-            (existing) =>
-              existing.subject === lesson.subject &&
-              existing.lesson_type === lesson.lesson_type &&
-              existing.auditory === lesson.auditory
-          );
-          if (existingLesson) {
-            if (!existingLesson.groups) existingLesson.groups = [existingLesson.group_name];
-            if (!existingLesson.groups.includes(lesson.group_name))
-              existingLesson.groups.push(lesson.group_name);
-          } else {
-            timeSlots[timeKey].lessons.push({ ...lesson, groups: [lesson.group_name] });
-          }
-        } else {
-          timeSlots[timeKey].lessons.push(lesson);
-        }
+        timeSlots[timeKey].lessons.push(lesson);
       }
     });
 
@@ -389,7 +368,7 @@ export default function Schedule() {
     }
   }, [currentDate]);
 
-  // Загрузка расписания на неделю с сервера - ИСПРАВЛЕННАЯ ВЕРСИЯ
+  // Загрузка расписания на неделю с сервера
   const loadWeekSchedule = async () => {
     console.log('Loading week schedule...');
     setIsLoading(true);
@@ -534,7 +513,7 @@ export default function Schedule() {
     }
   };
 
-  // Обновление данных при свайпе вниз - ИСПРАВЛЕННАЯ ВЕРСИЯ
+  // Обновление данных при свайпе вниз
   const onRefresh = async () => {
     console.log('Pull-to-refresh triggered');
     setRefreshing(true);
@@ -652,9 +631,7 @@ export default function Schedule() {
                 {lesson.subgroup > 0 && ` • Подгруппа ${lesson.subgroup}`}
               </Text>
               <Text style={styles.teacherText}>
-                {user.userType === 'student'
-                  ? lesson.teacher_name
-                  : lesson.groups?.join(', ') || lesson.group_name}
+                {lesson.teacher_name}
               </Text>
             </TouchableOpacity>
           </View>
@@ -735,7 +712,7 @@ export default function Schedule() {
             visible={modalVisible}
             lesson={selectedLesson}
             onClose={handleModalClose}
-            userType={user.userType}
+            userType="student"
           />
         )}
       </SafeAreaView>

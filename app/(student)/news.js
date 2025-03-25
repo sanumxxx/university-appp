@@ -1,3 +1,4 @@
+// app/(student)/news.js
 import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
@@ -8,6 +9,7 @@ import {
   Image,
   RefreshControl,
   ActivityIndicator,
+    ScrollView,
   Animated,
   Alert,
 } from 'react-native';
@@ -75,12 +77,13 @@ const NewsSkeleton = () => {
 };
 
 // Основной компонент экрана новостей
-export default function News() {
+export default function StudentNews() {
   const { user } = useAuth();
   const [news, setNews] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [isOffline, setIsOffline] = useState(false);
+  const [filter, setFilter] = useState('all'); // 'all', 'study', 'events', 'important'
 
   // Компонент плейсхолдера для изображений
   const NewsImagePlaceholder = ({ category }) => {
@@ -156,23 +159,51 @@ export default function News() {
       author: 'Пресс-служба МелГУ',
       published_at: '2025-03-19T09:15:00',
       category: 'Образование'
+    },
+    {
+      id: 4,
+      title: 'Изменения в расписании для групп 2211-0101 и 2211-0102',
+      content: 'Уважаемые студенты групп 2211-0101 и 2211-0102! Обращаем ваше внимание на изменения в расписании занятий со следующей недели. Лабораторные работы по предмету "Базы данных" переносятся с понедельника на среду (10:10-11:40, ауд. 305). Практические занятия по "Программированию" будут проходить в понедельник с 13:30 до 15:00 в аудитории 412.\n\nПросим учесть данные изменения при планировании своего учебного времени.',
+      image: null,
+      author: 'Деканат',
+      published_at: '2025-03-24T14:30:00',
+      category: 'Учеба',
+      important: true
     }
   ];
 
   useEffect(() => {
     loadNews();
-  }, []);
+  }, [filter]);
 
   // Функция загрузки новостей
   const loadNews = async () => {
     setIsLoading(true);
     try {
-      // В реальном приложении здесь будет API запрос
+      // В реальном приложении здесь будет API запрос с учетом фильтра
       // Имитируем задержку сети
       await new Promise(resolve => setTimeout(resolve, 1000));
 
+      // Фильтрация новостей согласно выбранному фильтру
+      let filteredNews = defaultNews;
+
+      if (filter !== 'all') {
+        const categoryMap = {
+          'study': ['Учеба', 'Образование'],
+          'events': ['События', 'Культура', 'Спорт'],
+          'important': ['Информация']
+        };
+
+        if (filter === 'important') {
+          filteredNews = defaultNews.filter(item => item.important === true);
+        } else {
+          const allowedCategories = categoryMap[filter] || [];
+          filteredNews = defaultNews.filter(item => allowedCategories.includes(item.category));
+        }
+      }
+
       // Используем демо-данные вместо реального API
-      setNews(defaultNews);
+      setNews(filteredNews);
 
       // Сохраняем новости в кэш
       await AsyncStorage.setItem('cached_news', JSON.stringify(defaultNews));
@@ -234,15 +265,22 @@ export default function News() {
   // Рендер элемента новости
   const renderNewsItem = ({ item }) => (
     <TouchableOpacity
-      style={styles.newsCard}
+      style={[
+        styles.newsCard,
+        item.important && styles.importantNewsCard
+      ]}
       onPress={() => viewNewsDetail(item)}
     >
-      <Image
-        source={{ uri: item.image }}
-        style={styles.newsImage}
-        defaultSource={require('../../assets/icon.png')} // Fallback изображение, если основное не загрузится
-        resizeMode="cover"
-      />
+      {item.image ? (
+        <Image
+          source={{ uri: item.image }}
+          style={styles.newsImage}
+          defaultSource={require('../../assets/icon.png')}
+          resizeMode="cover"
+        />
+      ) : (
+        <NewsImagePlaceholder category={item.category} />
+      )}
       <View style={styles.newsContent}>
         <Text style={styles.newsTitle}>{item.title}</Text>
         <Text style={styles.newsDescription} numberOfLines={2}>
@@ -257,6 +295,12 @@ export default function News() {
           </Text>
         </View>
       </View>
+      {item.important && (
+        <View style={styles.importantBadge}>
+          <Ionicons name="alert-circle" size={16} color="#FFFFFF" />
+          <Text style={styles.importantText}>Важно</Text>
+        </View>
+      )}
     </TouchableOpacity>
   );
 
@@ -270,6 +314,73 @@ export default function News() {
             <Text style={styles.offlineText}>Офлайн режим</Text>
           </View>
         )}
+      </View>
+
+      <View style={styles.filterContainer}>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.filterContent}
+        >
+          <TouchableOpacity
+            style={[
+              styles.filterButton,
+              filter === 'all' && styles.activeFilterButton
+            ]}
+            onPress={() => setFilter('all')}
+          >
+            <Text style={[
+              styles.filterText,
+              filter === 'all' && styles.activeFilterText
+            ]}>Все</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[
+              styles.filterButton,
+              filter === 'study' && styles.activeFilterButton
+            ]}
+            onPress={() => setFilter('study')}
+          >
+            <Text style={[
+              styles.filterText,
+              filter === 'study' && styles.activeFilterText
+            ]}>Учеба</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[
+              styles.filterButton,
+              filter === 'events' && styles.activeFilterButton
+            ]}
+            onPress={() => setFilter('events')}
+          >
+            <Text style={[
+              styles.filterText,
+              filter === 'events' && styles.activeFilterText
+            ]}>События</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[
+              styles.filterButton,
+              filter === 'important' && styles.activeFilterButton,
+              filter === 'important' && styles.importantFilterButton
+            ]}
+            onPress={() => setFilter('important')}
+          >
+            <Ionicons
+              name="alert-circle"
+              size={14}
+              color={filter === 'important' ? "#FFFFFF" : "#FF3B30"}
+              style={styles.filterIcon}
+            />
+            <Text style={[
+              styles.filterText,
+              filter === 'important' && styles.activeFilterText
+            ]}>Важное</Text>
+          </TouchableOpacity>
+        </ScrollView>
       </View>
 
       {isLoading ? (
@@ -312,13 +423,14 @@ const styles = StyleSheet.create({
     backgroundColor: '#F2F2F7',
   },
   header: {
+    flexDirection: 'row',
     padding: 16,
     backgroundColor: '#FFFFFF',
     borderBottomWidth: 1,
     borderBottomColor: '#E5E5EA',
-    flexDirection: 'row',
-    alignItems: 'center',
     justifyContent: 'center',
+    alignItems: 'center',
+    position: 'relative',
   },
   headerTitle: {
     fontSize: 17,
@@ -342,6 +454,41 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     marginLeft: 4,
   },
+  filterContainer: {
+    backgroundColor: '#FFFFFF',
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E5EA',
+  },
+  filterContent: {
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  filterButton: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    backgroundColor: '#F2F2F7',
+    borderRadius: 20,
+    marginHorizontal: 4,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  activeFilterButton: {
+    backgroundColor: '#007AFF',
+  },
+  importantFilterButton: {
+    backgroundColor: '#FF3B30',
+  },
+  filterText: {
+    fontSize: 14,
+    color: '#000000',
+    fontWeight: '500',
+  },
+  activeFilterText: {
+    color: '#FFFFFF',
+  },
+  filterIcon: {
+    marginRight: 4,
+  },
   list: {
     paddingHorizontal: 16,
     paddingVertical: 12,
@@ -356,6 +503,11 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 3,
     overflow: 'hidden',
+    position: 'relative',
+  },
+  importantNewsCard: {
+    borderWidth: 1,
+    borderColor: '#FF3B30',
   },
   newsImage: {
     width: '100%',
@@ -396,6 +548,23 @@ const styles = StyleSheet.create({
   newsDate: {
     fontSize: 13,
     color: '#8E8E93',
+  },
+  importantBadge: {
+    position: 'absolute',
+    top: 10,
+    left: 10,
+    backgroundColor: '#FF3B30',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  importantText: {
+    fontSize: 12,
+    color: '#FFFFFF',
+    fontWeight: '600',
+    marginLeft: 4,
   },
   emptyContainer: {
     alignItems: 'center',

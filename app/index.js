@@ -1,5 +1,6 @@
+// app/index.js - updated with role-based redirection
 import { View, ActivityIndicator } from 'react-native';
-import { Redirect, router } from 'expo-router';
+import { Redirect } from 'expo-router';
 import { useAuth } from '../context/auth';
 
 export default function Index() {
@@ -18,11 +19,19 @@ export default function Index() {
     );
   }
 
-  // Если пользователь авторизован - перенаправляем на главный экран
-  if (user) {
-    return <Redirect href="/(tabs)/schedule" />;
+  // If not logged in, redirect to auth
+  if (!user) {
+    return <Redirect href="/auth" />;
   }
 
-  // Если пользователь не авторизован - перенаправляем на экран входа
-  return <Redirect href="/auth" />;
+  // Role-based redirection
+  switch (user.userType) {
+    case 'admin':
+      return <Redirect href="/(admin)/dashboard" />;
+    case 'teacher':
+      return <Redirect href="/(teacher)/schedule" />;
+    case 'student':
+    default:
+      return <Redirect href="/(student)/schedule" />;
+  }
 }

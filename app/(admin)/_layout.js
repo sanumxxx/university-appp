@@ -1,7 +1,8 @@
+// app/(admin)/_layout.js - updated with improved role guards
 import React, { useState } from 'react';
 import { Stack } from 'expo-router';
 import { useAuth } from '../../context/auth';
-import { Redirect } from 'expo-router';
+import { Redirect, router } from 'expo-router';
 import { View, ActivityIndicator, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { usePathname } from 'expo-router';
@@ -105,8 +106,18 @@ export default function AdminLayout() {
     );
   }
 
-  // Redirect non-admin users to home
+  // Strict role check - redirect non-admin users to appropriate section
   if (!user || user.userType !== 'admin') {
+    // Determine where to redirect based on user type
+    if (!user) {
+      return <Redirect href="/auth" />;
+    } else if (user.userType === 'student') {
+      return <Redirect href="/(student)/schedule" />;
+    } else if (user.userType === 'teacher') {
+      return <Redirect href="/(teacher)/schedule" />;
+    }
+
+    // Fallback redirection
     return <Redirect href="/" />;
   }
 
