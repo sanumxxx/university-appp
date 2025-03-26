@@ -1,4 +1,6 @@
 // app/(student)/news.js
+
+
 import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
@@ -9,7 +11,7 @@ import {
   Image,
   RefreshControl,
   ActivityIndicator,
-    ScrollView,
+    ScrollView, // хз почему тут отступ, но пусть будет
   Animated,
   Alert,
 } from 'react-native';
@@ -17,17 +19,19 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../context/auth';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import api from '../../utils/api';
+import api from '../../utils/api'; // не юзается
 import dayjs from 'dayjs';
 import 'dayjs/locale/ru';
 
 dayjs.locale('ru');
 
-// Компонент скелетона для новостей
+// скелетон для новостей
+
 const NewsSkeleton = () => {
   const fadeAnim = useRef(new Animated.Value(0.3)).current;
 
   useEffect(() => {
+    // анимация прикольная но тяжелая
     Animated.loop(
       Animated.sequence([
         Animated.timing(fadeAnim, {
@@ -65,6 +69,7 @@ const NewsSkeleton = () => {
     </View>
   );
 
+
   return (
     <View>
       {[1, 2, 3, 4].map((_, index) => (
@@ -76,18 +81,21 @@ const NewsSkeleton = () => {
   );
 };
 
-// Основной компонент экрана новостей
+// главный экран новостей
+
 export default function StudentNews() {
-  const { user } = useAuth();
+  const { user } = useAuth(); // пока не нужен но пусть будет
   const [news, setNews] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [isOffline, setIsOffline] = useState(false);
-  const [filter, setFilter] = useState('all'); // 'all', 'study', 'events', 'important'
+  const [filter, setFilter] = useState('all'); // можно менять фильтры
 
-  // Компонент плейсхолдера для изображений
+  // плейсхолдер для картинок
+  // потом перенести в отдельный файл мб
   const NewsImagePlaceholder = ({ category }) => {
-    // Выбираем иконку в зависимости от категории новости
+    // иконки для категорий
+
     const getIconName = () => {
       switch (category) {
         case 'Учеба':
@@ -101,11 +109,12 @@ export default function StudentNews() {
         case 'Культура':
           return 'color-palette';
         default:
-          return 'newspaper';
+          return 'newspaper'; // для всякого мусора
       }
     };
 
-    // Выбираем цвет в зависимости от категории
+    // цвета для плейсхолдеров
+
     const getBackgroundColor = () => {
       switch (category) {
         case 'Учеба':
@@ -119,7 +128,7 @@ export default function StudentNews() {
         case 'Культура':
           return '#FF2D55';
         default:
-          return '#8E8E93';
+          return '#8E8E93'; // какой-то серый
       }
     };
 
@@ -131,7 +140,8 @@ export default function StudentNews() {
     );
   };
 
-  // Дефолтные новости из МелГУ
+  // тестовые новости
+  // апишки пока нет
   const defaultNews = [
     {
       id: 1,
@@ -176,22 +186,25 @@ export default function StudentNews() {
     loadNews();
   }, [filter]);
 
-  // Функция загрузки новостей
+  // загрузка новостей
+
   const loadNews = async () => {
     setIsLoading(true);
     try {
-      // В реальном приложении здесь будет API запрос с учетом фильтра
-      // Имитируем задержку сети
+      // пока без апи
+      // имитация задержки
       await new Promise(resolve => setTimeout(resolve, 1000));
+      // потом убрать
 
-      // Фильтрация новостей согласно выбранному фильтру
+      // фильтруем новости
       let filteredNews = defaultNews;
 
       if (filter !== 'all') {
+        // костыль для категорий
         const categoryMap = {
           'study': ['Учеба', 'Образование'],
           'events': ['События', 'Культура', 'Спорт'],
-          'important': ['Информация']
+          'important': ['Информация'] // важное отдельно
         };
 
         if (filter === 'important') {
@@ -202,16 +215,19 @@ export default function StudentNews() {
         }
       }
 
-      // Используем демо-данные вместо реального API
+      // тестовые данные
+      // TODO: апи
       setNews(filteredNews);
 
-      // Сохраняем новости в кэш
+      // кэш на всякий случай
+
       await AsyncStorage.setItem('cached_news', JSON.stringify(defaultNews));
       setIsOffline(false);
     } catch (error) {
       console.error('Ошибка при загрузке новостей:', error);
 
-      // Пытаемся загрузить новости из кэша при ошибке
+      // пробуем из кэша
+
       try {
         const cachedNews = await AsyncStorage.getItem('cached_news');
         if (cachedNews) {
@@ -224,6 +240,7 @@ export default function StudentNews() {
         }
       } catch (cacheError) {
         console.error('Ошибка при загрузке кэшированных новостей:', cacheError);
+
       }
     } finally {
       setIsLoading(false);
@@ -231,13 +248,15 @@ export default function StudentNews() {
     }
   };
 
-  // Обработчик обновления при свайпе вниз
+  // обновление свайпом
+
   const onRefresh = () => {
     setRefreshing(true);
     loadNews();
   };
 
-  // Форматирование даты публикации
+  // форматирование даты
+  // спасибо что есть dayjs
   const formatPublishedDate = (dateString) => {
     const date = dayjs(dateString);
     const now = dayjs();
@@ -253,7 +272,8 @@ export default function StudentNews() {
     }
   };
 
-  // Просмотр полной новости
+  // просмотр детальной новости
+  // пока на алертах, потом нормально сделаю
   const viewNewsDetail = (item) => {
     Alert.alert(
       item.title,
@@ -262,7 +282,8 @@ export default function StudentNews() {
     );
   };
 
-  // Рендер элемента новости
+  // рендер новости
+  // можно вынести в отдельный компонент
   const renderNewsItem = ({ item }) => (
     <TouchableOpacity
       style={[
@@ -275,7 +296,7 @@ export default function StudentNews() {
         <Image
           source={{ uri: item.image }}
           style={styles.newsImage}
-          defaultSource={require('../../assets/icon.png')}
+          defaultSource={require('../../assets/icon.png')} // если картинка не загрузится
           resizeMode="cover"
         />
       ) : (
@@ -316,6 +337,7 @@ export default function StudentNews() {
         )}
       </View>
 
+      {/* фильтры для новостей */}
       <View style={styles.filterContainer}>
         <ScrollView
           horizontal
@@ -383,6 +405,7 @@ export default function StudentNews() {
         </ScrollView>
       </View>
 
+      {/* контент или скелетон */}
       {isLoading ? (
         <NewsSkeleton />
       ) : (
@@ -397,7 +420,7 @@ export default function StudentNews() {
               refreshing={refreshing}
               onRefresh={onRefresh}
               tintColor="#007AFF"
-              colors={['#007AFF']}
+              colors={['#007AFF']} // для андроида
             />
           }
           ListEmptyComponent={
@@ -417,10 +440,12 @@ export default function StudentNews() {
   );
 }
 
+// стили
+// слишком много стилей...
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F2F2F7',
+    backgroundColor: '#F2F2F7', // серый фон
   },
   header: {
     flexDirection: 'row',
@@ -441,7 +466,7 @@ const styles = StyleSheet.create({
   offlineIndicator: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#FF9500',
+    backgroundColor: '#FF9500', // оранжевый
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 10,
@@ -466,17 +491,17 @@ const styles = StyleSheet.create({
   filterButton: {
     paddingHorizontal: 16,
     paddingVertical: 8,
-    backgroundColor: '#F2F2F7',
+    backgroundColor: '#F2F2F7', // серый
     borderRadius: 20,
     marginHorizontal: 4,
     flexDirection: 'row',
     alignItems: 'center',
   },
   activeFilterButton: {
-    backgroundColor: '#007AFF',
+    backgroundColor: '#007AFF', // синий
   },
   importantFilterButton: {
-    backgroundColor: '#FF3B30',
+    backgroundColor: '#FF3B30', // красный
   },
   filterText: {
     fontSize: 14,
@@ -501,13 +526,13 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
-    elevation: 3,
+    elevation: 3, // для андроида
     overflow: 'hidden',
     position: 'relative',
   },
   importantNewsCard: {
     borderWidth: 1,
-    borderColor: '#FF3B30',
+    borderColor: '#FF3B30', // красный
   },
   newsImage: {
     width: '100%',
@@ -525,7 +550,7 @@ const styles = StyleSheet.create({
   },
   newsDescription: {
     fontSize: 15,
-    color: '#3C3C43',
+    color: '#3C3C43', // серый текст
     lineHeight: 20,
     marginBottom: 12,
   },
@@ -535,7 +560,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   categoryTag: {
-    backgroundColor: '#E5E5EA',
+    backgroundColor: '#E5E5EA', // светло-серый
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 10,
@@ -547,13 +572,13 @@ const styles = StyleSheet.create({
   },
   newsDate: {
     fontSize: 13,
-    color: '#8E8E93',
+    color: '#8E8E93', // бледный текст
   },
   importantBadge: {
     position: 'absolute',
     top: 10,
     left: 10,
-    backgroundColor: '#FF3B30',
+    backgroundColor: '#FF3B30', // красный
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 10,
@@ -583,7 +608,8 @@ const styles = StyleSheet.create({
     marginTop: 8,
     textAlign: 'center',
   },
-  // Стили для скелетона
+  // стили скелетона
+  // скопировал из другого проекта
   skeletonImage: {
     width: '100%',
     height: 160,
